@@ -1,0 +1,11 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { changeStatus, validateIssue, isOverdue, completionRate } from '../lib/siteflow/domain.ts';
+const issue = { id:'SF-001', projectId:'p1', title:'確認', location:'橋脚A', assignee:'山田 太郎', dueDate:'2026-10-01', priority:'normal', description:'', status:'open', response:'', history:[] };
+test('業務フローの飛び越しを拒否する', () => { assert.throws(() => changeStatus(issue, 'done', '2026-09-30T00:00:00Z')); });
+test('対応内容がない確認依頼を拒否する', () => { assert.throws(() => changeStatus({...issue,status:'in_progress',response:'  '},'review','2026-09-30T00:00:00Z')); });
+test('対応と確認を経て完了し、元データを変更しない', () => { let current=changeStatus(issue,'in_progress','2026-09-30T00:00:00Z'); current=changeStatus({...current,response:'現地確認済み'},'review','2026-09-30T00:00:00Z'); current=changeStatus(current,'done','2026-09-30T00:00:00Z'); assert.equal(current.status,'done'); assert.equal(current.history.length,3); assert.equal(issue.status,'open'); assert.equal(issue.history.length,0); });
+test('確認待ちから差し戻せる', () => { assert.equal(changeStatus({...issue,status:'review'},'in_progress','2026-09-30T00:00:00Z').status,'in_progress'); });
+test('期限当日は超過ではなく、完了済みも超過に含めない', () => { assert.equal(isOverdue(issue,'2026-10-01'),false); assert.equal(isOverdue(issue,'2026-10-02'),true); assert.equal(isOverdue({...issue,status:'done'},'2026-10-02'),false); });
+test('存在しない日付と空白の件名を拒否する', () => { assert.ok(validateIssue({...issue,dueDate:'2026-02-30'})); assert.ok(validateIssue({...issue,title:'  '})); assert.equal(validateIssue(issue),null); });
+test('指摘0件は0%、完了件数から率を算出する', () => { assert.equal(completionRate([]),0); assert.equal(completionRate([issue,{...issue,status:'done'}]),50); });
