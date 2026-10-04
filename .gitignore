@@ -44,3 +44,12 @@ next-env.d.ts
 /.codex/
 /outputs/
 /work/
+
+# Local build cache and deployment identity
+*.tsbuildinfo
+/.openai/hosting.json
+/AGENTS.md
+.dev.vars*
+*.key
+*.p12
+*.pfx
