@@ -1,4 +1,4 @@
-name: Docker Build Check
+name: Docker Build and Smoke Test
 
 on:
   push:
@@ -18,3 +18,22 @@ jobs:
 
       - name: Build Docker image
         run: docker build -t siteflow:ci .
+
+      - name: Start Docker container
+        run: docker run -d --name siteflow-ci -p 127.0.0.1:3000:3000 siteflow:ci
+
+      - name: Check HTTP response
+        run: |
+          for i in {1..30}; do
+            if curl --fail --silent --show-error http://127.0.0.1:3000/ -o /dev/null; then
+              echo "SiteFlow HTTP check passed"
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs siteflow-ci
+          exit 1
+
+      - name: Show container logs
+        if: failure()
+        run: docker logs siteflow-ci
