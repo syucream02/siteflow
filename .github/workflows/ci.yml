@@ -19,6 +19,9 @@ jobs:
       - name: Build Docker image
         run: docker build -t siteflow:ci .
 
+      - name: Run unit tests
+        run: docker run --rm siteflow:ci node --test tests/domain.test.mjs
+
       - name: Start Docker container
         run: docker run -d --name siteflow-ci -p 127.0.0.1:3000:3000 siteflow:ci
 
