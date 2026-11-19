@@ -1,0 +1,330 @@
+// ローカル検証専用DBへ適用し、Next.js統合APIと本体ワークスペースへ接続済み。本番未適用。
+// 現在のアクセス権はTeamMembership、履歴用の人物記録はTeamParticipantに分離。
+// 進捗は0〜100の整数。会議は全件確認の開始・確認・取消・再開・終了まで。差分/決定事項は未実装。
+generator client {
+  provider            = "prisma-client"
+  output              = "../../examples/mysql/generated/integrated"
+  moduleFormat        = "esm"
+  importFileExtension = "ts"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+enum MembershipRole {
+  admin
+  member
+}
+
+enum ProjectStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  REVIEW
+  ON_HOLD
+  DONE
+}
+
+enum AssignmentChangeKind {
+  PRIMARY_CHANGE
+  SUPPORT_ADD
+  SUPPORT_REMOVE
+}
+
+model User {
+  id              String            @id
+  name            String            @db.Text
+  email           String
+  emailVerified   Boolean           @default(false)
+  image           String?           @db.Text
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  sessions        Session[]
+  accounts        Account[]
+  teammemberships TeamMembership[]
+  invitations     Invitation[]
+  participants    TeamParticipant[]
+
+  @@unique([email])
+  @@map("user")
+}
+
+model Session {
+  id                   String   @id
+  expiresAt            DateTime
+  token                String
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  ipAddress            String?  @db.Text
+  userAgent            String?  @db.Text
+  userId               String
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // 選択状態であり、アクセス権の証明ではない。
+  activeOrganizationId String?  @db.Text
+
+  @@unique([token])
+  @@index([userId])
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id
+  accountId             String    @db.Text
+  providerId            String    @db.Text
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?   @db.Text
+  refreshToken          String?   @db.Text
+  idToken               String?   @db.Text
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?   @db.Text
+  password              String?   @db.Text
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([userId])
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id
+  identifier String   @db.Text
+  value      String   @db.Text
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier(length: 191)])
+  @@map("verification")
+}
+
+model Team {
+  id              String            @id
+  name            String            @db.Text
+  slug            String
+  logo            String?           @db.Text
+  createdAt       DateTime
+  metadata        String?           @db.Text
+  teammemberships TeamMembership[]
+  invitations     Invitation[]
+  participants    TeamParticipant[]
+  projects        Project[]
+  meetings        Meeting[]
+
+  @@unique([slug])
+  @@map("Team")
+}
+
+// 有効な所属だけを管理。削除してもTeamParticipantは削除されない。
+model TeamMembership {
+  id        String         @id
+  teamId    String
+  team      Team           @relation(fields: [teamId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  userId    String
+  user      User           @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  role      MembershipRole
+  createdAt DateTime
+
+  @@unique([teamId, userId])
+  @@index([userId])
+  @@map("TeamMembership")
+}
+
+model Invitation {
+  id        String          @id
+  teamId    String
+  team      Team            @relation(fields: [teamId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  email     String          @db.Text
+  role      MembershipRole?
+  status    String          @db.Text
+  expiresAt DateTime
+  createdAt DateTime        @default(now())
+  inviterId String
+  user      User            @relation(fields: [inviterId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([teamId])
+  @@index([email(length: 191)])
+  @@map("invitation")
+}
+
+// 同じチームで過去に誰が関わったかを識別する記録。権限・roleは持たない。
+// 現在の所属を確かめた上で、初めて業務へ関わる際にupsertする方針。
+model TeamParticipant {
+  id        String   @id @default(uuid())
+  teamId    String
+  userId    String
+  createdAt DateTime @default(now())
+
+  team Team @relation(fields: [teamId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  primaryProjects     Project[]                  @relation("ProjectPrimaryParticipant")
+  createdProjects     Project[]                  @relation("ProjectCreatorParticipant")
+  supportProjects     ProjectSupportMember[]
+  progressChanges     ProjectProgressHistory[]
+  assignmentChanges   ProjectAssignmentHistory[] @relation("AssignmentActor")
+  previousAssignments ProjectAssignmentHistory[] @relation("AssignmentPreviousParticipant")
+  nextAssignments     ProjectAssignmentHistory[] @relation("AssignmentNextParticipant")
+  facilitatedMeetings Meeting[] @relation("MeetingFacilitator")
+  createdMeetings Meeting[] @relation("MeetingCreator")
+  confirmations MeetingConfirmation[] @relation("MeetingConfirmer")
+  revokedConfirmations MeetingConfirmation[] @relation("MeetingRevoker")
+
+  @@unique([teamId, userId])
+  @@unique([teamId, id])
+  @@index([userId])
+}
+
+model Project {
+  id                     String        @id @default(uuid())
+  teamId                 String
+  name                   String        @db.VarChar(200)
+  primaryParticipantId   String
+  createdByParticipantId String
+  createdByNameSnapshot  String        @db.Text
+  dueDate                DateTime      @db.Date
+  // APIで0〜100の整数を検証。DBのIntだけでは範囲を保証しない（追加CHECKは未実装）。
+  progress               Int           @default(0)
+  status                 ProjectStatus @default(NOT_STARTED)
+  code                   String?       @db.VarChar(100)
+  summary                String?       @db.Text
+  clientName             String?       @db.VarChar(200)
+  notes                  String?       @db.Text
+  version                Int           @default(1)
+  archivedAt             DateTime?
+  createdAt              DateTime      @default(now())
+  updatedAt              DateTime      @updatedAt
+
+  team                 Team            @relation(fields: [teamId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  primaryParticipant   TeamParticipant @relation("ProjectPrimaryParticipant", fields: [teamId, primaryParticipantId], references: [teamId, id], onDelete: Restrict, onUpdate: Restrict)
+  createdByParticipant TeamParticipant @relation("ProjectCreatorParticipant", fields: [teamId, createdByParticipantId], references: [teamId, id], onDelete: Restrict, onUpdate: Restrict)
+
+  supportMembers    ProjectSupportMember[]
+  progressHistory   ProjectProgressHistory[]
+  assignmentHistory ProjectAssignmentHistory[]
+  meetingEntries MeetingProject[]
+
+  @@unique([teamId, id])
+  @@index([teamId, archivedAt, dueDate])
+  @@index([teamId, primaryParticipantId])
+  @@index([teamId, createdByParticipantId])
+}
+
+model ProjectSupportMember {
+  teamId        String
+  projectId     String
+  participantId String
+  createdAt     DateTime @default(now())
+
+  project     Project         @relation(fields: [teamId, projectId], references: [teamId, id], onDelete: Restrict, onUpdate: Restrict)
+  participant TeamParticipant @relation(fields: [teamId, participantId], references: [teamId, id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@id([projectId, participantId])
+  @@index([teamId, projectId])
+  @@index([teamId, participantId])
+}
+
+// 分離APIで進捗と履歴を一括保存。履歴自体の更新/削除APIは公開しない。
+// 状態変更/再開でも同じ履歴に記録。DB管理者の直接操作まで防ぐ改ざん対策は未実装。
+model ProjectProgressHistory {
+  id                     String        @id @default(uuid())
+  teamId                 String
+  projectId              String
+  changedByParticipantId String
+  changedByNameSnapshot  String        @db.Text
+  previousProgress       Int
+  nextProgress           Int
+  previousStatus         ProjectStatus
+  nextStatus             ProjectStatus
+  comment                String?       @db.Text
+  changedAt              DateTime      @default(now())
+
+  project   Project         @relation(fields: [teamId, projectId], references: [teamId, id], onDelete: Restrict, onUpdate: Restrict)
+  changedBy TeamParticipant @relation(fields: [teamId, changedByParticipantId], references: [teamId, id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([teamId, projectId, changedAt, id])
+  @@index([teamId, changedByParticipantId])
+}
+
+// 分離APIで登録時/担当変更時の履歴を一括保存。履歴自体の更新・削除APIは公開しない。
+// DB管理者の直接操作まで防ぐ改ざん対策や、本体画面への接続は未実装。
+model ProjectAssignmentHistory {
+  id                     String               @id @default(uuid())
+  teamId                 String
+  projectId              String
+  kind                   AssignmentChangeKind
+  previousParticipantId  String?
+  nextParticipantId      String?
+  changedByParticipantId String
+  previousNameSnapshot   String?              @db.Text
+  nextNameSnapshot       String?              @db.Text
+  changedByNameSnapshot  String               @db.Text
+  changedAt              DateTime             @default(now())
+
+  project             Project          @relation(fields: [teamId, projectId], references: [teamId, id], onDelete: Restrict, onUpdate: Restrict)
+  previousParticipant TeamParticipant? @relation("AssignmentPreviousParticipant", fields: [teamId, previousParticipantId], references: [teamId, id], onDelete: Restrict, onUpdate: Restrict)
+  nextParticipant     TeamParticipant? @relation("AssignmentNextParticipant", fields: [teamId, nextParticipantId], references: [teamId, id], onDelete: Restrict, onUpdate: Restrict)
+  changedBy           TeamParticipant  @relation("AssignmentActor", fields: [teamId, changedByParticipantId], references: [teamId, id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([teamId, projectId, changedAt, id])
+  @@index([teamId, previousParticipantId])
+  @@index([teamId, nextParticipantId])
+  @@index([teamId, changedByParticipantId])
+}
+
+// 会議開始時の対象と、実際に確認した値を分けて保持する。
+model Meeting {
+  id String @id @default(uuid()) @db.VarChar(36)
+  teamId String
+  createdByParticipantId String
+  facilitatorParticipantId String?
+  startedAt DateTime @default(now())
+  endedAt DateTime?
+  version Int @default(1)
+  team Team @relation(fields: [teamId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  createdBy TeamParticipant @relation("MeetingCreator", fields: [teamId, createdByParticipantId], references: [teamId, id], onDelete: Restrict, onUpdate: Restrict)
+  facilitator TeamParticipant? @relation("MeetingFacilitator", fields: [teamId, facilitatorParticipantId], references: [teamId, id], onDelete: Restrict, onUpdate: Restrict)
+  projects MeetingProject[]
+  @@unique([teamId, id])
+  @@index([teamId, startedAt, id])
+  @@index([teamId, createdByParticipantId])
+  @@index([teamId, facilitatorParticipantId])
+}
+
+model MeetingProject {
+  id String @id @default(uuid()) @db.VarChar(36)
+  teamId String
+  meetingId String @db.VarChar(36)
+  projectId String
+  position Int
+  nameSnapshot String @db.VarChar(200)
+  meeting Meeting @relation(fields: [teamId, meetingId], references: [teamId, id], onDelete: Restrict, onUpdate: Restrict)
+  project Project @relation(fields: [teamId, projectId], references: [teamId, id], onDelete: Restrict, onUpdate: Restrict)
+  confirmations MeetingConfirmation[]
+  @@unique([teamId, id])
+  @@unique([meetingId, projectId])
+  @@unique([meetingId, position])
+  @@index([teamId, projectId])
+}
+
+model MeetingConfirmation {
+  id String @id @default(uuid()) @db.VarChar(36)
+  teamId String
+  entryId String @db.VarChar(36)
+  progress Int
+  status ProjectStatus
+  projectVersion Int
+  confirmedAt DateTime @default(now())
+  confirmedByParticipantId String
+  confirmedByNameSnapshot String @db.Text
+  revokedAt DateTime?
+  revokedByParticipantId String?
+  revokedByNameSnapshot String? @db.Text
+  entry MeetingProject @relation(fields: [teamId, entryId], references: [teamId, id], onDelete: Restrict, onUpdate: Restrict)
+  confirmedBy TeamParticipant @relation("MeetingConfirmer", fields: [teamId, confirmedByParticipantId], references: [teamId, id], onDelete: Restrict, onUpdate: Restrict)
+  revokedBy TeamParticipant? @relation("MeetingRevoker", fields: [teamId, revokedByParticipantId], references: [teamId, id], onDelete: Restrict, onUpdate: Restrict)
+  @@index([teamId, entryId, confirmedAt, id])
+  @@index([teamId, confirmedByParticipantId])
+  @@index([teamId, revokedByParticipantId])
+}

@@ -2,6 +2,10 @@
 
 # dependencies
 /node_modules
+/examples/mysql/node_modules/
+/examples/mysql/generated/
+/examples/mysql/.next/
+/examples/mysql/next-env.d.ts
 /.pnp
 .pnp.*
 .yarn/*

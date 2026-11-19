@@ -1,0 +1,12 @@
+{
+  "name": "siteflow-migration-tools",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.13.0" },
+  "dependencies": {
+    "@prisma/adapter-mariadb": "7.10.1",
+    "@prisma/client": "7.10.1",
+    "prisma": "7.10.1"
+  }
+}

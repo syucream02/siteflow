@@ -1,0 +1,45 @@
+{
+  "name": "siteflow-mysql-connection-check",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "generate": "prisma generate --config prisma7.config.ts",
+    "check": "npm run generate && node --env-file=../../.env.mysql.local --import tsx check.ts",
+    "dev:api": "npm run generate && node dev-api.mjs",
+    "dev:auth": "npm run generate:integrated-design && node --import tsx dev-auth.mjs",
+    "prepare:workspace": "npm run generate:integrated-design && node --import tsx prepare-workspace.ts",
+    "test:workspace": "node --import tsx check-workspace-browser.mjs",
+    "test:meeting": "node run-meeting-check.mjs",
+    "test:backup-restore": "node --import tsx check-backup-restore.mjs",
+    "test:public-integrated": "node --import tsx check-https-cookies.mjs --integrated-public",
+    "test:https-cookies": "node --import tsx check-https-cookies.mjs",
+    "test:next-preview": "node --import tsx check-https-cookies.mjs --next-workspace",
+    "test:auth-check": "npm run generate:integrated-design && node run-auth-check.mjs",
+    "typecheck": "tsc --noEmit --project tsconfig.json",
+    "validate:design": "prisma validate --config prisma7.config.ts --schema ../../db/design/schema.prisma",
+    "generate:auth-design": "auth generate --config schema-auth.config.ts --adapter prisma --dialect mysql --output ../../db/design/auth-generated.prisma --yes",
+    "validate:auth-design": "prisma validate --config prisma7.config.ts --schema ../../db/design/auth-generated.prisma",
+    "validate:integrated-design": "prisma validate --config prisma7.config.ts --schema ../../db/design/integrated.prisma",
+    "generate:integrated-design": "prisma generate --config prisma7.config.ts --schema ../../db/design/integrated.prisma",
+    "preview:integrated-design": "prisma migrate diff --config prisma-design.config.ts --from-empty --to-schema ../../db/design/integrated.prisma --script --output ../../db/design/integrated-preview.sql",
+    "prepare:schema-check": "node prepare-schema-check.mjs",
+    "status:schema-check": "node prepare-schema-check.mjs --status",
+    "migrate:schema-check": "prisma migrate deploy --config prisma-schema-check.config.ts",
+    "test:schema-check": "npm run generate:integrated-design && node --env-file=../../.env.schema-check.local --experimental-strip-types --test ../../tests/schema-check.test.mjs"
+  },
+  "dependencies": {
+    "@prisma/adapter-mariadb": "7.10.1",
+    "@prisma/client": "7.10.1"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.19",
+    "auth": "1.7.23",
+    "better-auth": "1.7.23",
+    "prisma": "7.10.1",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3"
+  }
+}

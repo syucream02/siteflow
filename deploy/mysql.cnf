@@ -1,0 +1,15 @@
+[mysqld]
+innodb_buffer_pool_size=128M
+max_connections=30
+performance_schema=OFF
+# 初版はSQL backup単位の復元。任意時刻の復旧/replicationは提供しない。
+skip-log-bin
+# core-fileは指定しない（既定OFF）。実行時のcore上限はComposeで0にする。
+general_log=OFF
+slow_query_log=OFF
+log_error=/run/siteflow/logs/mysql-error.log
+require_secure_transport=ON
+tls_version=TLSv1.2,TLSv1.3
+ssl_ca=/run/siteflow/server/ca.pem
+ssl_cert=/run/siteflow/server/server.pem
+ssl_key=/run/siteflow/server/server-key.pem

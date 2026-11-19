@@ -1,0 +1,23 @@
+[Unit]
+Description=SiteFlow MySQL with verified data EBS
+Requires=docker.service
+After=docker.service
+RequiresMountsFor=/srv/siteflow-mysql
+BindsTo=srv-siteflow\x2dmysql.mount
+After=srv-siteflow\x2dmysql.mount
+# 初回DB準備・起動を承認されるまでこのファイルを作らない。
+ConditionPathExists=/etc/siteflow/mysql-enabled
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile=-/srv/siteflow-mysql/config/mysql-runtime.env
+EnvironmentFile=/etc/siteflow/mysql-host.env
+ExecStartPre=/usr/local/lib/siteflow/check-database-mount.sh
+ExecStart=/usr/local/lib/siteflow/start-secure-mysql.sh
+ExecStop=/usr/bin/docker compose -f /usr/local/lib/siteflow/compose.production.yaml --profile database stop --timeout 60 mysql
+TimeoutStartSec=180
+TimeoutStopSec=75
+
+[Install]
+WantedBy=multi-user.target

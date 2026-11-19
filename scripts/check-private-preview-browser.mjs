@@ -1,0 +1,71 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { spawn, execFileSync } from 'node:child_process';
+import { generateKeyPairSync, privateDecrypt, constants } from 'node:crypto';
+import assert from 'node:assert/strict';
+if(process.env.SITEFLOW_BROWSER_CHECK_APPROVED!=='yes'||!process.env.SITEFLOW_PREVIEW_PROFILE)throw Error('EXPLICIT_BROWSER_TEST_APPROVAL_AND_FRESH_PROFILE_REQUIRED');
+const profile=path.resolve(process.env.SITEFLOW_PREVIEW_PROFILE);
+assert.equal(path.dirname(profile),path.resolve('work'));
+assert.ok(path.basename(profile).startsWith('siteflow-private-browser-'));
+assert.ok(!fs.existsSync(path.join(profile,'DevToolsActivePort')),'FRESH_PROFILE_REQUIRED');
+const base='https://13.237.188.172';
+let browser,ws,send,phase='credential-transfer',projectId;
+const checks=[],certificateErrors=[];
+try {
+  const pair=generateKeyPairSync('rsa',{modulusLength:4096});
+  const publicKey=Buffer.from(pair.publicKey.export({type:'spki',format:'pem'})).toString('base64');
+  const code=`const f=require('fs'),c=require('crypto'); if(f.readFileSync('/sys/fs/cgroup/memory.swap.max','utf8').trim()!=='0')process.exit(1); const b=f.readFileSync('/run/account.json'); console.log(c.publicEncrypt({key:Buffer.from('${publicKey}','base64'),oaepHash:'sha256'},b).toString('base64'));`;
+  const remote=`import subprocess\np=subprocess.run(['docker','run','--rm','--network','none','--read-only','--memory','64m','--memory-swap','64m','--ulimit','core=0','--log-driver','none','--mount','type=bind,source=/srv/siteflow-mysql/config/candidate-20261117T110748Z/test-account/account.json,target=/run/account.json,readonly','--entrypoint','node','siteflow:candidate-migration-20261117','-e',${JSON.stringify(code)}],stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=30)\nif p.returncode:raise SystemExit(1)\nprint(p.stdout.decode().strip())\n`;
+  const cipher=execFileSync('C:/Windows/System32/OpenSSH/ssh.exe',['-i','C:/Users/syucream/Downloads/siteflow-key.pem','-o','BatchMode=yes','-o','StrictHostKeyChecking=yes','-o','ConnectTimeout=10','ec2-user@13.237.188.172','base64 --decode --ignore-garbage | sudo -n python3 -'],{input:Buffer.from(remote).toString('base64'),encoding:'utf8',stdio:['pipe','pipe','pipe'],windowsHide:true,timeout:45000}).trim();
+  const account=JSON.parse(privateDecrypt({key:pair.privateKey,oaepHash:'sha256',padding:constants.RSA_PKCS1_OAEP_PADDING},Buffer.from(cipher,'base64')).toString());
+  phase='browser-start';assert.ok(fs.existsSync(profile));
+  browser=spawn('C:/Program Files/Google/Chrome/Application/chrome.exe',['--no-first-run','--no-default-browser-check','--incognito','--disable-background-networking','--remote-debugging-port=0',`--user-data-dir=${profile}`,'--proxy-server=http://127.0.0.1:31289','--window-size=1440,1000','about:blank'],{windowsHide:false,stdio:'ignore'});
+  let port;
+  for(let n=0;n<100;n++){try{port=fs.readFileSync(path.join(profile,'DevToolsActivePort'),'utf8').split('\n')[0];break;}catch{await new Promise(r=>setTimeout(r,100));}}
+  assert.ok(port);const tabs=await(await fetch(`http://127.0.0.1:${port}/json`)).json();
+  ws=new WebSocket(tabs.find(p=>p.type==='page').webSocketDebuggerUrl);await new Promise((resolve,reject)=>{ws.onopen=resolve;ws.onerror=reject;});
+  let id=0;const pending=new Map();
+  send=(method,params={})=>new Promise((resolve,reject)=>{const next=++id;pending.set(next,{resolve,reject});ws.send(JSON.stringify({id:next,method,params}));});
+  ws.onmessage=event=>{const m=JSON.parse(event.data);if(m.id&&pending.has(m.id)){const p=pending.get(m.id);pending.delete(m.id);if(m.error){p.reject(Error('CDP_FAILED'));}else{p.resolve(m.result);}}if(m.method==='Security.certificateError')certificateErrors.push(m.params.errorType);};
+  const evaluate=async expression=>{const r=await send('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw Error('BROWSER_EVALUATION_FAILED');return r.result.value;};
+  const wait=async(expression,label)=>{for(let n=0;n<160;n++){if(await evaluate(expression))return;await new Promise(r=>setTimeout(r,100));}throw Error('WAIT_'+label);};
+  const fill=(selector,value)=>evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});Object.getOwnPropertyDescriptor(e.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value').set.call(e,${JSON.stringify(value)});e.dispatchEvent(new Event('input',{bubbles:true}));})()`);
+  const select=(selector,value)=>evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});e.value=${JSON.stringify(value)};e.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+  const click=async text=>{await wait(`[...document.querySelectorAll('button')].some(b=>b.textContent===${JSON.stringify(text)}&&!b.disabled)`,'BUTTON');await evaluate(`(()=>{[...document.querySelectorAll('button')].find(b=>b.textContent===${JSON.stringify(text)}&&!b.disabled).click();})()`);};
+  const width=w=>send('Emulation.setDeviceMetricsOverride',{width:w,height:1000,deviceScaleFactor:1,mobile:w===390});
+  const shot=async name=>{const r=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:true});fs.writeFileSync('docs/images/'+name+'.png',Buffer.from(r.data,'base64'));};
+  await send('Page.enable');await send('Network.enable');await send('Security.enable');
+  phase='https-login';await width(1440);await send('Page.navigate',{url:base+'/workspace'});await wait("!!document.getElementById('login-email')",'LOGIN_FORM');
+  assert.equal(await evaluate('window.isSecureContext'),true);assert.deepEqual(certificateErrors,[]);
+  await fill('#login-email',account.email);await fill('#login-password',account.password);await click('ログイン');
+  await wait("!!document.getElementById('team-select')",'LOGGED_IN');await select('#team-select',account.teamId);
+  await wait("document.querySelectorAll('[data-project-id]').length>=1",'PROJECTS');
+  const cookies=(await send('Network.getCookies',{urls:[base+'/api/siteflow/auth/get-session']})).cookies;
+  assert.ok(cookies.some(c=>c.httpOnly&&c.secure&&c.path==='/api/siteflow'));
+  assert.equal(await evaluate(`Object.values(localStorage).some(v=>v.includes(${JSON.stringify(account.password)}))`),false);
+  checks.push('PC Chrome trusts real HTTPS certificate; Secure/HttpOnly cookie login, no password in localStorage');
+  phase='create-project';await click('新しい案件を登録');await wait("!!document.getElementById('project-name')",'CREATE_FORM');
+  const name='AWSブラウザー確認 '+Date.now();
+  await fill('#project-name',name);await fill('#project-due','2027-04-30');await fill('#project-summary','PCブラウザー・SSH内HTTPS経由の架空確認');
+  await wait(`!!document.querySelector('#project-primary option[value="${account.userId}"]')`,'MEMBER');await select('#project-primary',account.userId);await click('案件を登録する');
+  await wait("!!document.getElementById('detail-title')",'DETAIL');
+  const first=await evaluate(`fetch('/api/siteflow/teams/${account.teamId}/projects').then(r=>r.json()).then(d=>d.items.find(p=>p.name===${JSON.stringify(name)})).then(p=>({id:p.id,progress:p.progress}))`);projectId=first.id;assert.equal(first.progress,0);
+  phase='save-project';await click('進捗を更新');await wait("!!document.getElementById('edit-progress')",'EDIT');await fill('#edit-progress','35');await fill('#edit-comment','HTTPSブラウザーから保存');await click('変更を保存する');
+  await wait("!!document.getElementById('detail-title')",'SAVED');
+  assert.equal(await evaluate(`fetch('/api/siteflow/teams/${account.teamId}/projects/${projectId}').then(r=>r.json()).then(d=>d.project.progress)`),35);
+  phase='reload-retrieve';await send('Page.reload');await wait("!!document.getElementById('team-select')",'RELOAD_SESSION');await select('#team-select',account.teamId);await wait(`!!document.querySelector('[data-project-id="${projectId}"] button')`,'RELOADED_PROJECT');
+  await evaluate(`document.querySelector('[data-project-id="${projectId}"] button').click()`);await wait("!!document.getElementById('detail-title')",'REOPEN_DETAIL');
+  assert.equal(await evaluate(`fetch('/api/siteflow/teams/${account.teamId}/projects/${projectId}').then(r=>r.json()).then(d=>d.project.progress)`),35);
+  checks.push('UI project create/save progress35; full reload, actual session cookie and saved data retained');
+  await width(1440);await shot('aws-candidate-https-desktop');await width(390);assert.equal(await evaluate('document.documentElement.scrollWidth<=innerWidth'),true);await shot('aws-candidate-https-mobile');checks.push('1440/390 screenshots; mobile no horizontal overflow');
+  phase='logout';await click('ログアウト');await wait("!!document.getElementById('login-email')",'LOGGED_OUT');
+  assert.equal(await evaluate(`fetch('/api/siteflow/teams/${account.teamId}/projects').then(r=>r.status)`),401);checks.push('UI logout and protected API401');
+  assert.deepEqual(certificateErrors,[]);account.password='';
+  const result={passed:true,observedAt:new Date().toISOString(),checks,projectId,progress:35,httpsWarningsBypassed:false,publicRouteChanged:false,credentialTransfer:'RSA-OAEP encrypted before leaving EBS helper; decrypted only in PC test memory',screenshots:['docs/images/aws-candidate-https-desktop.png','docs/images/aws-candidate-https-mobile.png']};
+  fs.writeFileSync('work/aws-browser-results.json',JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify(result));
+}catch{
+ const result={passed:false,phase,projectId,reason:'BROWSER_CHECK_FAILED_REDACTED',action:'STOP browser check; keep AWS candidate and legacy public route'};fs.writeFileSync('work/aws-browser-results.json',JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify(result));process.exitCode=1;
+}finally{
+ if(send&&ws?.readyState===WebSocket.OPEN){await send('Browser.close').catch(()=>{});ws.close();}
+ else browser?.kill();
+}

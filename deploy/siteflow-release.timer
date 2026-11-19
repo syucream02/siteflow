@@ -1,0 +1,11 @@
+[Unit]
+Description=Check for approved SiteFlow release (enable only after explicit approval)
+
+[Timer]
+OnCalendar=*:0/5
+RandomizedDelaySec=15s
+Persistent=true
+Unit=siteflow-release.service
+
+[Install]
+WantedBy=timers.target
