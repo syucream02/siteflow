@@ -1,0 +1,129 @@
+name: siteflow-production
+x-app: &app
+  image: ${SITEFLOW_APP_IMAGE:?digest固定のアプリイメージが必要}
+  restart: 'no'
+  read_only: true
+  ulimits:
+    core:
+      soft: 0
+      hard: 0
+  tmpfs:
+    - /tmp:rw,nosuid,nodev,size=32m,uid=1000,gid=1000,mode=1777
+  stop_grace_period: 30s
+  logging:
+    driver: none
+  mem_limit: 384m
+  memswap_limit: 384m
+  env_file: ${SITEFLOW_RUNTIME_ENV_FILE:?秘密設定ファイルが必要}
+  environment:
+    NODE_ENV: production
+    HOSTNAME: 0.0.0.0
+    PORT: '3000'
+    SITEFLOW_WORKSPACE_MODE: public-integrated
+    SITEFLOW_DB_HOST: mysql.siteflow.test
+    SITEFLOW_DB_PORT: '3306'
+    SITEFLOW_DB_TLS: required
+    SITEFLOW_DB_CA_FILE: /run/siteflow/ca.pem
+    SITEFLOW_DB_PASSWORD_FILE: /run/secrets/db-password
+    SITEFLOW_AUTH_SECRET_FILE: /run/secrets/auth-secret
+  volumes:
+    - type: bind
+      source: ${SITEFLOW_DB_CA_FILE:?CA公開証明書が必要}
+      target: /run/siteflow/ca.pem
+      read_only: true
+      bind:
+        create_host_path: false
+    - type: bind
+      source: ${SITEFLOW_APP_DB_PASSWORD_FILE:-/srv/siteflow-mysql/secrets/candidate/db-password}
+      target: /run/secrets/db-password
+      read_only: true
+      bind:
+        create_host_path: false
+    - type: bind
+      source: ${SITEFLOW_APP_AUTH_SECRET_FILE:-/srv/siteflow-mysql/secrets/candidate/auth-secret}
+      target: /run/secrets/auth-secret
+      read_only: true
+      bind:
+        create_host_path: false
+  networks: [database]
+services:
+  mysql:
+    image: ${SITEFLOW_MYSQL_IMAGE:?digest固定のMySQLイメージが必要}
+    profiles: [database]
+    # mount guard付きsystemd起動へ一本化。Docker daemonからの自動再開はしない。
+    restart: 'no'
+    stop_grace_period: 60s
+    # 初期化出力を非暗号化のDockerログへ保存しない。DB error logはdata EBS内。
+    logging:
+      driver: none
+    read_only: true
+    ulimits:
+      core:
+        soft: 0
+        hard: 0
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=32m,mode=1777
+      - /var/run/mysqld:rw,nosuid,nodev,noexec,size=16m,uid=999,gid=999,mode=0755
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - 'mysql --defaults-extra-file=/run/secrets/root-client.cnf --batch --skip-column-names --execute="SELECT 1" | grep -qx 1'
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 60s
+    mem_limit: 512m
+    memswap_limit: 512m
+    environment:
+      MYSQL_ROOT_PASSWORD_FILE: /run/secrets/mysql-root-password
+      MYSQL_ROOT_HOST: localhost
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - type: bind
+        source: ./mysql.cnf
+        target: /etc/mysql/conf.d/siteflow.cnf
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${SITEFLOW_MYSQL_TLS_DIRECTORY:?mysql所有のTLSファイルが必要}
+        target: /run/siteflow/server
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${SITEFLOW_MYSQL_ROOT_PASSWORD_FILE:?root秘密ファイルが必要}
+        target: /run/secrets/mysql-root-password
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${SITEFLOW_MYSQL_CLIENT_CONFIG_FILE:?暗号化EBS内のroot client設定が必要}
+        target: /run/secrets/root-client.cnf
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${SITEFLOW_MYSQL_LOG_DIRECTORY:?暗号化EBS内のDBログdirが必要}
+        target: /run/siteflow/logs
+        bind:
+          create_host_path: false
+    networks:
+      database:
+        aliases: [mysql.siteflow.test]
+  blue:
+    <<: *app
+    profiles: [blue]
+    ports: ['127.0.0.1:3101:3000']
+  green:
+    <<: *app
+    profiles: [green]
+    ports: ['127.0.0.1:3102:3000']
+volumes:
+  mysql-data:
+    external: true
+    name: ${SITEFLOW_MYSQL_VOLUME:?既存の永続volume名が必要}
+networks:
+  database:
+    external: true
+    name: ${SITEFLOW_DATABASE_NETWORK:?事前作成したネットワークが必要}

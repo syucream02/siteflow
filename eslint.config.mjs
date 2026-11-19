@@ -8,7 +8,11 @@ const eslintConfig = defineConfig([
   // Override default ignores of eslint-config-next.
   globalIgnores([
     // Default ignores of eslint-config-next:
-    ".next/**",
+    "**/.next/**",
+    // Local scratch files and exported verification tools are not project sources.
+    // Keep app/, deploy/, scripts/ and tests/ covered by the normal rules.
+    "work/**",
+    "examples/mysql/generated/**",
     "out/**",
     "build/**",
     "next-env.d.ts",

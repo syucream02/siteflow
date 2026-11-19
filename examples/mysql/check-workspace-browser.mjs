@@ -1,0 +1,386 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import { spawn } from 'node:child_process';
+import assert from 'node:assert/strict';
+import { PrismaMariaDb } from '@prisma/adapter-mariadb';
+import { PrismaClient } from './generated/integrated/client.ts';
+import { readSchemaCheckSettings } from './schema-check-settings.mjs';
+import { createLocalWorkspaceData, removeLocalWorkspaceData } from './local-workspace-data.ts';
+
+const settings = readSchemaCheckSettings();
+const prisma = new PrismaClient({ adapter: new PrismaMariaDb({ host: '127.0.0.1', port: settings.port, user: settings.user, password: settings.password, database: settings.database, connectionLimit: 2 }) });
+const base = process.env.SITEFLOW_BROWSER_ORIGIN ?? 'http://127.0.0.1:5173';
+const browserOrigin = new URL(base);
+if (browserOrigin.origin !== base || browserOrigin.protocol !== 'http:' || browserOrigin.hostname !== '127.0.0.1' || !browserOrigin.port) throw new Error('PC内の検証URLだけを指定してください。');
+const output = path.resolve('../../work/workspace-preview'); fs.mkdirSync(output, { recursive: true });
+const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'siteflow-workspace-chrome-'));
+let data, child, ws, send, mode = '', held = [];
+const checks = [];
+const auxiliaryUsers = [];
+let createRequests = 0;
+let updateRequests = 0;
+try {
+  data = await createLocalWorkspaceData(prisma);
+  await prisma.project.update({ where: { id: data.projectIds[0] }, data: { summary: '架空の案件概要\n二行目の説明', clientName: '架空の取引先', notes: '<script>window.fixtureExecuted=true</script>', progress: 21, status: 'IN_PROGRESS' } });
+  const participant = await prisma.teamParticipant.findFirstOrThrow({ where: { teamId: data.teamIds[0], userId: data.userId } });
+  await prisma.projectProgressHistory.createMany({ data: Array.from({ length: 21 }, (_, index) => ({ id: crypto.randomUUID(), teamId: data.teamIds[0], projectId: data.projectIds[0], previousProgress: index, nextProgress: index + 1, previousStatus: 'IN_PROGRESS', nextStatus: 'IN_PROGRESS', changedAt: new Date(Date.UTC(2026, 10, 15, 0, index)), comment: `架空の進捗メモ ${index + 1}`, changedByParticipantId: participant.id, changedByNameSnapshot: '変更時の架空ユーザー名' })) });
+  for (const current of [true, false]) {
+    const userId = crypto.randomUUID(); auxiliaryUsers.push(userId);
+    await prisma.user.create({ data: { id: userId, name: current ? '架空の副担当B' : '架空の元所属C', email: `${userId}@example.invalid`, emailVerified: true } });
+    if (current) await prisma.teamMembership.create({ data: { id: crypto.randomUUID(), teamId: data.teamIds[0], userId, role: 'member', createdAt: new Date() } });
+    const support = await prisma.teamParticipant.create({ data: { id: crypto.randomUUID(), teamId: data.teamIds[0], userId } });
+    await prisma.projectSupportMember.create({ data: { teamId: data.teamIds[0], projectId: data.projectIds[0], participantId: support.id } });
+  }
+  const extraCandidates = Array.from({ length: 22 }, (_, index) => ({ id: crypto.randomUUID(), name: `架空の追加候補 ${index + 1}`, emailVerified: true }));
+  auxiliaryUsers.push(...extraCandidates.map(user => user.id));
+  await prisma.user.createMany({ data: extraCandidates.map(user => ({ ...user, email: `${user.id}@example.invalid` })) });
+  await prisma.teamMembership.createMany({ data: extraCandidates.map(user => ({ id: crypto.randomUUID(), teamId: data.teamIds[0], userId: user.id, role: 'member', createdAt: new Date() })) });
+  child = spawn('C:/Program Files/Google/Chrome/Application/chrome.exe', ['--headless=new', '--no-first-run', '--disable-background-networking', '--remote-debugging-port=0', `--user-data-dir=${profile}`, 'about:blank'], { windowsHide: true, stdio: 'ignore' });
+  let port;
+  for (let i = 0; i < 100; i++) { try { port = fs.readFileSync(path.join(profile, 'DevToolsActivePort'), 'utf8').split('\n')[0]; break; } catch { await new Promise(r => setTimeout(r, 100)); } }
+  assert.ok(port, 'Chrome port');
+  const pages = await (await fetch(`http://127.0.0.1:${port}/json`)).json();
+  ws = new WebSocket(pages.find(p => p.type === 'page').webSocketDebuggerUrl);
+  await new Promise((resolve, reject) => { ws.onopen = resolve; ws.onerror = reject; });
+  let id = 0; const pending = new Map();
+  send = (method, params = {}) => new Promise((resolve, reject) => { const next = ++id; pending.set(next, { resolve, reject }); ws.send(JSON.stringify({ id: next, method, params })); });
+  ws.onmessage = event => {
+    const m = JSON.parse(event.data);
+    if (m.id && pending.has(m.id)) { const p = pending.get(m.id); pending.delete(m.id); if (m.error) p.reject(new Error('CDP command failed')); else p.resolve(m.result); }
+    if (m.method === 'Fetch.requestPaused') {
+      const { requestId, request } = m.params;
+      const isCreate = request.method === 'POST' && /\/projects$/.test(request.url);
+      const isMembers = /\/members(?:\?|$)/.test(request.url);
+      const isUpdate = request.method === 'PATCH' || request.method === 'PUT' || request.method === 'POST' && /\/(archive|restore)$/.test(request.url);
+      const isArchiveList = /\/archived-projects(?:\?|$)/.test(request.url);
+      if (mode === 'hold-archives' && isArchiveList) { held.push(requestId); return; }
+      if (mode === 'fail-archives' && isArchiveList) { void send('Fetch.fulfillRequest', { requestId, responseCode: 503, responseHeaders: [{ name: 'Content-Type', value: 'application/json' }], body: Buffer.from(JSON.stringify({ message: '検証用の保管一覧取得失敗です。' })).toString('base64') }).catch(() => {}); return; }
+      if (isUpdate) updateRequests++;
+      if (mode === 'hold-update' && isUpdate || mode === 'hold-editor' && request.method === 'GET' && /\/projects\/[a-f0-9-]+$/.test(request.url)) { held.push(requestId); return; }
+      if (mode === 'fail-update' && isUpdate) { void send('Fetch.fulfillRequest', { requestId, responseCode: 503, responseHeaders: [{ name: 'Content-Type', value: 'application/json' }], body: Buffer.from(JSON.stringify({ message: '検証用の保存失敗です。' })).toString('base64') }).catch(() => {}); return; }
+      if (isCreate) createRequests++;
+      if (mode === 'hold-members' && isMembers || mode === 'hold-create' && isCreate) { held.push(requestId); return; }
+      if (mode === 'fail-members' && isMembers || mode === 'fail-create' && isCreate || mode === 'empty-members' && isMembers) {
+        const empty = mode === 'empty-members';
+        void send('Fetch.fulfillRequest', { requestId, responseCode: empty ? 200 : 503, responseHeaders: [{ name: 'Content-Type', value: 'application/json' }], body: Buffer.from(JSON.stringify(empty ? { items: [], page: { hasMore: false, nextCursor: null } } : { message: '検証用の通信失敗です。' })).toString('base64') }).catch(() => {}); return;
+      }
+      if (mode === 'hold-a' && request.url.includes(`/teams/${data.teamIds[0]}/projects`) || mode === 'hold-detail' && request.url.endsWith(`/projects/${data.projectIds[0]}`) || mode === 'hold-related' && request.url.includes('/progress-history')) held.push(requestId);
+      else if (mode === 'fail-projects' && /\/projects(?:\?|$)/.test(request.url) || mode === 'fail-detail' && request.url.endsWith(`/projects/${data.projectIds[0]}`) || mode === 'fail-related' && request.url.includes('/progress-history') || mode === 'fail-related-more' && request.url.includes('/progress-history?cursor=') || mode === 'fail-logout' && request.url.includes('/auth/sign-out')) {
+        void send('Fetch.fulfillRequest', { requestId, responseCode: 503, responseHeaders: [{ name: 'Content-Type', value: 'application/json' }], body: Buffer.from(JSON.stringify({ message: '検証用の通信失敗です。再試行できます。' })).toString('base64') }).catch(() => {});
+      } else void send('Fetch.continueRequest', { requestId }).catch(() => {});
+    }
+  };
+  const evaluate = async expression => { const r = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }); if (r.exceptionDetails) throw new Error('Browser evaluation failed'); return r.result.value; };
+  const waitFor = async (expression, label) => {
+    for (let i = 0; i < 160; i++) { if (await evaluate(expression)) return; await new Promise(r => setTimeout(r, 100)); }
+    throw new Error('Timed out: ' + label);
+  };
+  const screenshot = async name => { const r = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true }); fs.writeFileSync(path.join(output, name + '.png'), Buffer.from(r.data, 'base64')); };
+  const width = value => send('Emulation.setDeviceMetricsOverride', { width: value, height: 1000, deviceScaleFactor: 1, mobile: value === 390 });
+  const fit = async () => assert.equal(await evaluate('document.documentElement.scrollWidth<=innerWidth'), true, 'horizontal overflow');
+  const selectTeam = value => evaluate(`(() => {const el=document.getElementById('team-select');el.value=${JSON.stringify(value)};el.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+  const fill = (selector, value) => evaluate(`(() => {const el=document.querySelector(${JSON.stringify(selector)});Object.getOwnPropertyDescriptor(el.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value').set.call(el,${JSON.stringify(value)});el.dispatchEvent(new Event('input',{bubbles:true}));})()`);
+  const clickText = async text => {
+    await waitFor(`[...document.querySelectorAll('button')].some(b=>b.textContent===${JSON.stringify(text)} && !b.disabled)`, 'action ready');
+    return evaluate(`(() => {const button=[...document.querySelectorAll('button')].find(b=>b.textContent===${JSON.stringify(text)});if(!button)throw Error('Button unavailable');button.click();})()`);
+  };
+  const login = async password => {
+    await fill('#login-email', data.email); await fill('#login-password', password);
+    await evaluate("document.getElementById('login-password').focus()");
+    await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 }); await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 });
+    assert.equal(await evaluate("document.activeElement?.textContent==='ログイン'"), true, 'keyboard submit focus');
+    await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r', unmodifiedText: '\r' }); await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+  };
+  await send('Page.enable'); await send('Network.enable');
+  await send('Fetch.enable', { patterns: [{ urlPattern: '*api/siteflow/*', requestStage: 'Request' }] });
+  await width(1440); await send('Page.navigate', { url: base + '/workspace' });
+  await waitFor("!!document.getElementById('login-email')", 'login form'); await fit(); await screenshot('login-1440');
+  await width(390); await fit(); await screenshot('login-390'); checks.push('Login layout: 1440/390');
+  await login('wrong-test-password');
+  await waitFor("!!document.querySelector('[role=alert]')", 'sign-in failure');
+  assert.equal(await evaluate('document.getElementById("login-email").value===' + JSON.stringify(data.email)), true);
+  assert.equal(await evaluate('document.getElementById("login-password").value===' + JSON.stringify('wrong-test-password')), true); checks.push('Failed login keeps input; keyboard Tab/Enter');
+  await login(data.password); await waitFor("!!document.getElementById('team-select')", 'signed in teams');
+  await selectTeam(data.teamIds[0]); await waitFor("document.querySelectorAll('[data-project-id]').length===20", 'first page');
+  await width(1440); await fit(); await screenshot('projects-1440'); await width(390); await fit(); await screenshot('projects-390');
+  const cookies = (await send('Network.getCookies', { urls: [base + '/api/siteflow/auth/get-session'] })).cookies;
+  assert.ok(cookies.some(c => c.httpOnly && c.path === '/api/siteflow'), 'HttpOnly cookie scope');
+  assert.equal(await evaluate(`Object.values(localStorage).some(v=>v.includes(${JSON.stringify(data.password)}))`), false);
+  checks.push('Real cookie login; own teams; projects; no password in localStorage');
+  await clickText('続きを読み込む'); await waitFor("document.querySelectorAll('[data-project-id]').length===21", 'second page');
+  assert.equal(await evaluate("new Set([...document.querySelectorAll('[data-project-id]')].map(e=>e.dataset.projectId)).size"), 21); checks.push('20 + 1 projects; no duplicates');
+  const openFirst = async () => {
+    await evaluate(`document.querySelector('[data-project-id="${data.projectIds[0]}"] button').focus()`);
+    await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' });
+    await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+  };
+  await openFirst(); await waitFor("document.body.textContent.includes('架空の取引先')", 'project detail');
+  assert.equal(await evaluate("document.activeElement?.id==='detail-title'"), true);
+  assert.equal(await evaluate("document.querySelector('dd').textContent==='ローカル体験ユーザー'"), true);
+  assert.equal(await evaluate("document.body.textContent.includes('<script>window.fixtureExecuted=true</script>') && !window.fixtureExecuted"), true);
+  await width(1440); await fit(); await screenshot('detail-1440'); await width(390); await fit(); await screenshot('detail-390');
+  checks.push('Keyboard opens detail; focus heading; basic fields and literal notes; 1440/390');
+  await clickText('副担当'); await waitFor("document.body.textContent.includes('架空の副担当B') && document.body.textContent.includes('架空の元所属C')", 'support members');
+  assert.equal(await evaluate("document.body.textContent.includes('現在はチームに所属していません')"), true); checks.push('Current and former support membership displayed');
+  mode = 'fail-related'; await clickText('進捗・状態の履歴'); await waitFor("!!document.querySelector('[role=alert]')", 'history failure');
+  mode = ''; await clickText('もう一度取得する'); await waitFor("document.querySelectorAll('[data-related-id]').length===20", 'history retry');
+  assert.equal(await evaluate("document.body.textContent.includes('変更時の架空ユーザー名')"), true);
+  mode = 'fail-related-more'; await clickText('関連情報をさらに読む'); await waitFor("!!document.querySelector('[role=alert]')", 'history next failure');
+  assert.equal(await evaluate("document.querySelectorAll('[data-related-id]').length"),20);
+  mode = ''; await clickText('関連情報を最初から取得する'); await waitFor("document.querySelectorAll('[data-related-id]').length===20", 'history restart');
+  await clickText('関連情報をさらに読む'); await waitFor("document.querySelectorAll('[data-related-id]').length===21", 'history next page');
+  assert.equal(await evaluate("new Set([...document.querySelectorAll('[data-related-id]')].map(e=>e.dataset.relatedId)).size"), 21);
+  await screenshot('history-390'); checks.push('History failure retry; snapshot name; 20+1 with no duplicates');
+  await clickText('担当変更の履歴'); await waitFor("document.body.textContent.includes('主担当の変更')", 'assignment history');
+  assert.equal(await evaluate("document.body.textContent.includes('なし → ローカル体験ユーザー')"), true); checks.push('Assignment history initial null and name');
+  mode = 'hold-related'; await clickText('進捗・状態の履歴');
+  for(let i=0;i<60&&held.length===0;i++)await new Promise(r=>setTimeout(r,50));assert.ok(held.length);
+  await clickText('担当変更の履歴');await waitFor("document.body.textContent.includes('主担当の変更')", 'history switch');
+  mode='';for(const requestId of held)await send('Fetch.continueRequest',{requestId}).catch(()=>{});held=[];await new Promise(r=>setTimeout(r,300));
+  assert.equal(await evaluate("document.querySelectorAll('[data-related-id]').length"),1);
+  checks.push('Late related response does not overwrite selected history');
+  await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent==='一覧へ戻る').focus()");
+  await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' });await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+  await waitFor("!document.querySelector('[data-project-detail]')", 'back to list');
+  assert.equal(await evaluate("document.activeElement?.getAttribute('aria-label')==='架空の案件 01の詳細を開く'"), true);
+  assert.equal(await evaluate("document.querySelectorAll('[data-project-id]').length"), 21); checks.push('Back restores opener focus and 21 loaded rows');
+  mode = 'fail-detail'; await openFirst(); await waitFor("!!document.querySelector('[role=alert]')", 'detail failure'); await screenshot('detail-error-390');
+  mode = ''; await clickText('もう一度取得する'); await waitFor("document.body.textContent.includes('架空の取引先')", 'detail retry');
+  await clickText('一覧へ戻る');
+  await prisma.project.update({ where: { id: data.projectIds[1] }, data: { archivedAt: new Date() } });
+  await evaluate(`document.querySelector('[data-project-id="${data.projectIds[1]}"] button').click()`);
+  await waitFor("document.querySelector('[role=alert]')?.textContent==='案件が見つかりません。'", 'archived stale detail');
+  await clickText('一覧へ戻る'); await prisma.project.update({ where: { id: data.projectIds[1] }, data: { archivedAt: null } });
+  await evaluate(`document.querySelector('[data-project-id="${data.projectIds[1]}"] button').click()`); await waitFor("!!document.querySelector('dl')", 'second detail');
+  await clickText('副担当'); await waitFor("document.body.textContent.includes('副担当は登録されていません')", 'empty support');
+  await clickText('進捗・状態の履歴'); await waitFor("document.body.textContent.includes('履歴はまだありません')", 'empty history');
+  await clickText('一覧へ戻る'); checks.push('Detail failure retry; actual archive 404; empty support/history');
+  const scoped = await evaluate(`Promise.all([fetch('/api/siteflow/teams/${data.teamIds[1]}/projects/${data.projectIds[0]}').then(r=>r.status),fetch('/api/siteflow/teams/${data.teamIds[1]}/projects/${data.projectIds[0]}/progress-history').then(r=>r.status)])`);
+  assert.deepEqual(scoped, [404,404]); checks.push('Authenticated cross-team project and history rejected');
+  mode = 'hold-detail'; await openFirst();
+  for(let i=0;i<60&&held.length===0;i++)await new Promise(r=>setTimeout(r,50)); assert.ok(held.length);
+  assert.equal(await evaluate("document.body.textContent.includes('案件詳細を読み込んでいます')"), true);
+  await selectTeam(data.teamIds[1]); await waitFor("document.body.textContent.includes('このチームの案件はまだありません')", 'detail team switch');
+  mode='';for(const requestId of held)await send('Fetch.continueRequest',{requestId}).catch(()=>{});held=[];
+  await new Promise(r=>setTimeout(r,300));
+  assert.equal(await evaluate("!!document.querySelector('[data-project-detail]')"),false);checks.push('Pending detail discarded on team switch');
+  await send('Page.reload', { ignoreCache: true }); await waitFor("!!document.getElementById('team-select')", 'session after reload'); await selectTeam(data.teamIds[1]);
+  await waitFor("document.body.textContent.includes('このチームの案件はまだありません')", 'empty team'); await fit(); await screenshot('empty-390'); checks.push('Session reload and empty team');
+  mode = 'fail-projects'; await selectTeam(data.teamIds[0]); await waitFor("!!document.querySelector('[role=alert]')", 'project failure'); await screenshot('error-390');
+  mode = ''; await clickText('案件を再取得する'); await waitFor("document.querySelectorAll('[data-project-id]').length===20", 'retry'); checks.push('Project failure and retry');
+  await selectTeam(data.teamIds[1]); await waitFor("document.body.textContent.includes('このチームの案件はまだありません')", 'empty before race');
+  mode = 'hold-a'; await selectTeam(data.teamIds[0]);
+  for (let i = 0; i < 60 && held.length === 0; i++) await new Promise(r => setTimeout(r, 50)); assert.ok(held.length, 'held request');
+  assert.ok(await evaluate("document.body.textContent.includes('案件を読み込んでいます')"), 'loading state');
+  await selectTeam(data.teamIds[1]); await waitFor("document.body.textContent.includes('このチームの案件はまだありません')", 'race new team');
+  mode = ''; for (const requestId of held) await send('Fetch.continueRequest', { requestId }).catch(() => {}); held = [];
+  await new Promise(r => setTimeout(r, 300)); assert.equal(await evaluate("document.querySelectorAll('[data-project-id]').length"), 0); checks.push('Loading indicator; late previous-team response does not mix');
+  await prisma.session.deleteMany({ where: { userId: data.userId } });
+  await selectTeam(data.teamIds[0]); await waitFor("!!document.getElementById('login-email')", 'expired session'); assert.equal(await evaluate("document.querySelectorAll('[data-project-id]').length"), 0); checks.push('Expired session clears team data');
+  await login(data.password); await waitFor("!!document.getElementById('team-select')", 'login again');
+  await selectTeam(data.teamIds[0]); await waitFor("document.querySelectorAll('[data-project-id]').length===20", 'create list');
+  mode = 'fail-members';
+  await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent==='新しい案件を登録').focus()");
+  await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' }); await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+  await waitFor("!!document.querySelector('[data-project-create] [role=alert]')", 'candidate failure');
+  assert.equal(await evaluate("document.activeElement?.id==='create-title'"), true);
+  await fill('#project-name', '架空の新規案件'); await fill('#project-due', '2026-01-15');
+  await fill('#project-code', 'CREATE-QA'); await fill('#project-client', '架空の登録先'); await fill('#project-summary', '架空の概要\n二行目');
+  await fill('#project-notes', 'あ'.repeat(2000));
+  mode = ''; await clickText('担当候補を再取得する'); await waitFor("!!document.getElementById('project-primary')", 'candidate retry');
+  assert.equal(await evaluate("document.getElementById('project-name').value"),'架空の新規案件');
+  await clickText('担当候補の続きを取得する');await waitFor("document.querySelectorAll('#project-primary option').length===25", 'candidate second page');
+  await evaluate(`(()=>{const e=document.getElementById('project-primary');e.value=${JSON.stringify(data.userId)};e.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+  await evaluate(`document.querySelector('input[type=checkbox][value="${auxiliaryUsers[0]}"]').click()`);
+  await width(1440);await fit();await screenshot('create-1440');await width(390);await fit();await screenshot('create-390');
+  checks.push('Keyboard opens create; candidate failure retry; 20+4 candidates; fields and 2000 Japanese characters; 1440/390');
+  await fill('#project-name', '   ');const beforeInvalid=createRequests;await clickText('案件を登録する');
+  await waitFor("document.querySelector('[data-project-create] [role=alert]')?.textContent.includes('案件名は')", 'domain validation');assert.equal(createRequests,beforeInvalid);
+  await fill('#project-name', '架空の新規案件');
+  await prisma.teamMembership.deleteMany({where:{teamId:data.teamIds[0],userId:auxiliaryUsers[0]}});
+  await clickText('案件を登録する');await waitFor("document.querySelector('[data-project-create] [role=alert]') && ![...document.querySelectorAll('button')].find(b=>b.textContent==='案件を登録する')?.disabled", 'stale assignee rejection');
+  assert.equal(await prisma.project.count({where:{teamId:data.teamIds[0]}}),21);assert.equal(await evaluate("document.getElementById('project-name').value"),'架空の新規案件');
+  await prisma.teamMembership.create({data:{id:crypto.randomUUID(),teamId:data.teamIds[0],userId:auxiliaryUsers[0],role:'member',createdAt:new Date()}});
+  checks.push('Client rejects blank name without POST; API rejects removed assignee and keeps input');
+  mode='fail-create';await clickText('案件を登録する');await waitFor("document.querySelector('[data-project-create] [role=alert]')?.textContent.includes('保存済みの可能性')", 'unknown create result');
+  assert.equal(await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent==='案件を登録する').disabled"),true);
+  assert.equal(await evaluate("document.getElementById('project-notes').value.length"),2000);await screenshot('create-uncertain-390');
+  await evaluate("document.querySelector('[class*=uncertain] input').click()");
+  mode='hold-create';const beforeSuccess=createRequests;
+  await evaluate("(()=>{const b=[...document.querySelectorAll('button')].find(b=>b.textContent==='案件を登録する');b.click();b.click();})()");
+  for(let i=0;i<60&&held.length===0;i++)await new Promise(r=>setTimeout(r,50));assert.equal(held.length,1);assert.equal(createRequests,beforeSuccess+1);
+  assert.equal(await evaluate("document.getElementById('team-select').disabled && [...document.querySelectorAll('button')].find(b=>b.textContent==='ログアウト').disabled"),true);
+  mode='';for(const requestId of held)await send('Fetch.continueRequest',{requestId});held=[];
+  await waitFor("document.body.textContent.includes('案件を登録しました。') && !!document.querySelector('[data-project-detail] dl')", 'created detail');
+  assert.equal(await evaluate("document.body.textContent.includes('架空の新規案件') && document.body.textContent.includes('未着手 · 進捗 0％')"),true);
+  const saved=await prisma.project.findFirstOrThrow({where:{teamId:data.teamIds[0],code:'CREATE-QA'},include:{supportMembers:true,assignmentHistory:true}});
+  assert.equal(saved.notes.length,2000);assert.equal(saved.supportMembers.length,1);assert.equal(saved.assignmentHistory.length,2);assert.equal(saved.progress,0);assert.equal(saved.status,'NOT_STARTED');assert.equal(saved.version,1);
+  assert.equal(await prisma.project.count({where:{teamId:data.teamIds[0]}}),22);
+  checks.push('Unknown result requires confirmation; double-submit blocked; real save, initial assignees/history; created detail');
+  await send('Page.reload',{ignoreCache:true});await waitFor("!!document.getElementById('team-select')", 'created session reload');await selectTeam(data.teamIds[0]);
+  await waitFor(`!!document.querySelector('[data-project-id="${saved.id}"]')`, 'created project persists');checks.push('Created project persists after reload');
+  mode='hold-members';await clickText('新しい案件を登録');for(let i=0;i<60&&held.length===0;i++)await new Promise(r=>setTimeout(r,50));assert.ok(held.length);
+  await selectTeam(data.teamIds[1]);await waitFor("document.body.textContent.includes('このチームの案件はまだありません')", 'create switch team');
+  mode='';for(const requestId of held)await send('Fetch.continueRequest',{requestId}).catch(()=>{});held=[];await new Promise(r=>setTimeout(r,300));assert.equal(await evaluate("!!document.querySelector('[data-project-create]')"),false);
+  mode='empty-members';await clickText('新しい案件を登録');await waitFor("document.body.textContent.includes('担当候補がいません')", 'no candidates');
+  assert.equal(await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent==='案件を登録する').disabled"),true);
+  mode='';await clickText('入力を破棄して一覧へ戻る');assert.equal(await evaluate("document.activeElement?.textContent"),'新しい案件を登録');checks.push('Old candidate response discarded on team change; empty candidates disable save; cancel focus');
+  await clickText('新しい案件を登録');await waitFor("document.querySelectorAll('#project-primary option').length===2", 'minimal candidate');
+  const beforeNative=createRequests;
+  const enterSave=async()=>{await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent==='案件を登録する').focus()");await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13,text:'\r'});await send('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});};
+  await enterSave();assert.equal(await evaluate("document.activeElement?.id"),'project-name');assert.equal(createRequests,beforeNative);
+  await fill('#project-name','架空の最小入力案件');await fill('#project-due','2026-12-31');
+  await evaluate(`(()=>{const e=document.getElementById('project-primary');e.value=${JSON.stringify(data.userId)};e.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+  await enterSave();await waitFor("document.body.textContent.includes('案件を登録しました。') && !!document.querySelector('[data-project-detail] dl')", 'keyboard minimal create');
+  const minimal=await prisma.project.findFirstOrThrow({where:{teamId:data.teamIds[1]},include:{supportMembers:true,assignmentHistory:true}});
+  assert.equal(minimal.name,'架空の最小入力案件');for(const key of ['code','clientName','summary','notes'])assert.equal(minimal[key],null);assert.equal(minimal.supportMembers.length,0);assert.equal(minimal.assignmentHistory.length,1);
+  checks.push('Keyboard submit; native required field focus; minimal create with optional nulls and zero support');
+  const openEditor = async (label, selector) => { await clickText(label); await waitFor(`!!document.querySelector(${JSON.stringify(selector)})`, 'editor ready'); };
+  const acceptLatest = async () => { await clickText('最新の内容を確認する'); await waitFor("[...document.querySelectorAll('button')].some(b=>b.textContent==='比較しました。入力を保持して保存可能にする')", 'comparison ready'); await clickText('比較しました。入力を保持して保存可能にする'); };
+  const keyboardSaveEdit = async () => { await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent==='変更を保存する').focus()"); await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13,text:'\r'});await send('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13}); };
+  await openEditor('基本情報を編集','#edit-name');await fill('#edit-name','編集した架空の案件');await fill('#edit-notes','編集した架空の備考\n二行目');
+  await prisma.project.update({where:{id:minimal.id},data:{name:'別の人が更新した案件',clientName:'並行更新の取引先',version:{increment:1}}});
+  await keyboardSaveEdit();await waitFor("!!document.querySelector('[data-project-editor] [role=alert]')", 'edit conflict');
+  assert.equal(await evaluate("document.getElementById('edit-name').value"),'編集した架空の案件');
+  assert.equal(await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent==='変更を保存する').disabled"),true);
+  await clickText('最新の内容を確認する');await waitFor("document.body.textContent.includes('並行更新の取引先')", 'latest fields');
+  assert.equal(await evaluate("document.getElementById('edit-clientName').value"),'');
+  await width(1440);await fit();await screenshot('edit-conflict-1440');await width(390);await fit();await screenshot('edit-conflict-390');
+  await clickText('比較しました。入力を保持して保存可能にする');
+  mode='fail-update';await keyboardSaveEdit();await waitFor("document.querySelector('[data-project-editor] [role=alert]')?.textContent.includes('検証用の保存失敗')", 'edit transport failure');
+  assert.equal(await evaluate("document.getElementById('edit-notes').value"),'編集した架空の備考\n二行目');mode='';await acceptLatest();
+  mode='hold-update';const beforeEdit=updateRequests;await evaluate("(()=>{const b=[...document.querySelectorAll('button')].find(b=>b.textContent==='変更を保存する');b.click();b.click();})()");
+  for(let i=0;i<60&&held.length===0;i++)await new Promise(r=>setTimeout(r,50));assert.equal(held.length,1);assert.equal(updateRequests,beforeEdit+1);assert.equal(await evaluate("document.getElementById('team-select').disabled"),true);
+  mode='';for(const requestId of held)await send('Fetch.continueRequest',{requestId});held=[];
+  await waitFor("!document.querySelector('[data-project-editor]') && document.body.textContent.includes('編集した架空の案件')", 'basic saved');
+  const edited=await prisma.project.findUniqueOrThrow({where:{id:minimal.id}});assert.equal(edited.version,3);assert.equal(edited.clientName,'並行更新の取引先');assert.equal(edited.notes,'編集した架空の備考\n二行目');
+  checks.push('Basic editing: real 409 comparison preserves input, no automatic version swap, 503 retry, one save, partial fields preserve concurrent data');
+  await openEditor('基本情報を編集','#edit-name');await fill('#edit-clientName','');await keyboardSaveEdit();await waitFor("!document.querySelector('[data-project-editor]')", 'clear optional');assert.equal((await prisma.project.findUniqueOrThrow({where:{id:minimal.id}})).clientName,null);
+  checks.push('Basic editing clears optional field with null');
+  await openEditor('進捗を更新','#edit-progress');await fill('#edit-progress','40');await fill('#edit-comment','架空の進捗更新メモ');await keyboardSaveEdit();await waitFor("!document.querySelector('[data-project-editor]') && document.body.textContent.includes('進捗 40％')", 'progress saved');
+  let progressRows=await prisma.projectProgressHistory.findMany({where:{projectId:minimal.id}});assert.equal(progressRows.length,1);assert.equal(progressRows[0].previousProgress,0);assert.equal(progressRows[0].nextProgress,40);assert.equal(progressRows[0].comment,'架空の進捗更新メモ');
+  await openEditor('進捗を更新','#edit-progress');await fill('#edit-progress','100');await keyboardSaveEdit();await waitFor("!document.querySelector('[data-project-editor]') && document.body.textContent.includes('未着手 · 進捗 100％')", '100 not complete');
+  progressRows=await prisma.projectProgressHistory.findMany({where:{projectId:minimal.id}});assert.equal(progressRows.length,2);await clickText('進捗・状態の履歴');await waitFor("document.body.textContent.includes('40％ → 100％')", 'updated history');await screenshot('edit-progress-history-390');
+  await prisma.project.update({where:{id:minimal.id},data:{status:'DONE',version:{increment:1}}});await send('Page.reload',{ignoreCache:true});await waitFor("!!document.getElementById('team-select')", 'reload completed');await selectTeam(data.teamIds[1]);await waitFor(`!!document.querySelector('[data-project-id="${minimal.id}"]')`, 'completed row');await evaluate(`document.querySelector('[data-project-id="${minimal.id}"] button').click()`);await waitFor("!!document.querySelector('[data-project-detail] dl')", 'completed detail');
+  assert.equal(await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent==='進捗を更新').disabled"),true);checks.push('Progress saves values and history; 100 keeps status; completed project disables progress editor');
+  await selectTeam(data.teamIds[0]);await waitFor(`!!document.querySelector('[data-project-id="${saved.id}"]')`, 'assignment row');await evaluate(`document.querySelector('[data-project-id="${saved.id}"] button').click()`);await waitFor("!!document.querySelector('[data-project-detail] dl')", 'assignment detail');await openEditor('担当者を変更','#edit-primary');await waitFor("[...document.querySelectorAll('button')].find(b=>b.textContent==='変更を保存する')?.disabled===false", 'assignment candidates');
+  await evaluate(`(()=>{const e=document.getElementById('edit-primary');e.value=${JSON.stringify(auxiliaryUsers[0])};e.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+  await evaluate(`document.querySelector('[data-project-editor] input[type=checkbox][value="${data.userId}"]').click()`);
+  await prisma.teamMembership.deleteMany({where:{teamId:data.teamIds[0],userId:auxiliaryUsers[0]}});await keyboardSaveEdit();await waitFor("!!document.querySelector('[data-project-editor] [role=alert]')", 'assignment stale membership');assert.equal(await evaluate("document.getElementById('edit-primary').value"),auxiliaryUsers[0]);assert.equal((await prisma.project.findUniqueOrThrow({where:{id:saved.id}})).version,1);
+  await prisma.teamMembership.create({data:{id:crypto.randomUUID(),teamId:data.teamIds[0],userId:auxiliaryUsers[0],role:'member',createdAt:new Date()}});await width(1440);await fit();await screenshot('edit-assignees-1440');await width(390);await fit();await screenshot('edit-assignees-390');
+  await keyboardSaveEdit();await waitFor("!document.querySelector('[data-project-editor]')", 'assignment saved');const reassigned=await prisma.project.findUniqueOrThrow({where:{id:saved.id},include:{primaryParticipant:true,supportMembers:{include:{participant:true}},assignmentHistory:true}});assert.equal(reassigned.primaryParticipant.userId,auxiliaryUsers[0]);assert.deepEqual(reassigned.supportMembers.map(row=>row.participant.userId),[data.userId]);assert.equal(reassigned.assignmentHistory.length,5);assert.equal(reassigned.version,2);checks.push('Assignee change retains stale-selection input, swaps primary/support and writes exact history');
+  await prisma.teamMembership.updateMany({where:{teamId:data.teamIds[0],userId:data.userId},data:{role:'member'}});await prisma.projectSupportMember.deleteMany({where:{projectId:saved.id}});await prisma.project.update({where:{id:saved.id},data:{version:{increment:1}}});
+  await openEditor('基本情報を編集','#edit-name');await fill('#edit-name','権限外の編集');await keyboardSaveEdit();await waitFor("!!document.querySelector('[data-project-editor] [role=alert]')", 'permission denied');assert.equal(await evaluate("document.getElementById('edit-name').value"),'権限外の編集');assert.equal((await prisma.project.findUniqueOrThrow({where:{id:saved.id}})).name,'架空の新規案件');await clickText('入力を破棄して詳細へ戻る');await prisma.teamMembership.updateMany({where:{teamId:data.teamIds[0],userId:data.userId},data:{role:'admin'}});checks.push('API denies ordinary non-assignee editing even when client controls exist');
+  mode='hold-editor';await clickText('基本情報を編集');for(let i=0;i<60&&held.length===0;i++)await new Promise(r=>setTimeout(r,50));assert.ok(held.length);await selectTeam(data.teamIds[1]);await waitFor("!document.querySelector('[data-project-editor]')", 'editor team switch');mode='';for(const requestId of held)await send('Fetch.continueRequest',{requestId}).catch(()=>{});held=[];await new Promise(r=>setTimeout(r,300));assert.equal(await evaluate("!!document.querySelector('[data-project-editor]')"),false);checks.push('Pending editor snapshot discarded on team switch');
+  const statusProjectId = data.projectIds[2];
+  const selectStatus = value => evaluate(`(()=>{const e=document.getElementById('edit-status');e.value=${JSON.stringify(value)};e.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+  const statusReady = async label => { await waitFor(`[...document.querySelectorAll('button')].some(b=>b.textContent===${JSON.stringify(label)})`, 'status action'); await openEditor(label,'#edit-status'); };
+  const savedStatus = async expected => { await waitFor(`!document.querySelector('[data-project-editor]') && !!document.querySelector('[data-project-detail] dl') && document.querySelector('[data-project-detail] [class*=detailStatus]')?.textContent.includes(${JSON.stringify(expected)})`, 'state save'); };
+  await selectTeam(data.teamIds[0]);await waitFor(`!!document.querySelector('[data-project-id="${statusProjectId}"]')`, 'state row');await evaluate(`document.querySelector('[data-project-id="${statusProjectId}"] button').click()`);await waitFor("!!document.querySelector('[data-project-detail] dl')", 'state detail');
+  await statusReady('状態を変更');
+  assert.deepEqual(await evaluate("[...document.querySelectorAll('#edit-status option')].map(e=>e.value)"),['','IN_PROGRESS','ON_HOLD']);
+  await selectStatus('ON_HOLD');await fill('#edit-status-comment','架空の保留理由');await keyboardSaveEdit();await savedStatus('保留');
+  await statusReady('状態を変更');await selectStatus('IN_PROGRESS');await keyboardSaveEdit();await savedStatus('進行中');
+  await statusReady('状態を変更');await selectStatus('REVIEW');await fill('#edit-status-comment','架空の確認依頼');await keyboardSaveEdit();await savedStatus('確認待ち');
+  await statusReady('状態を変更');assert.equal(await evaluate("document.querySelector('#edit-status option[value=DONE]').disabled"),true);await clickText('入力を破棄して詳細へ戻る');
+  assert.equal((await prisma.project.findUniqueOrThrow({where:{id:statusProjectId}})).progress,0);
+  checks.push('State transitions: start choices prevent skipping; hold, resume, review; completion disabled below 100; progress retained');
+  await openEditor('進捗を更新','#edit-progress');await fill('#edit-progress','100');await keyboardSaveEdit();await savedStatus('確認待ち');
+  await statusReady('状態を変更');await selectStatus('DONE');await fill('#edit-status-comment','架空の完了確認');await width(1440);await fit();await screenshot('status-complete-1440');await width(390);await fit();await screenshot('status-complete-390');
+  mode='hold-update';const beforeComplete=updateRequests;await evaluate("(()=>{const b=[...document.querySelectorAll('button')].find(b=>b.textContent==='変更を保存する');b.click();b.click();})()");for(let i=0;i<60&&held.length===0;i++)await new Promise(r=>setTimeout(r,50));assert.equal(updateRequests,beforeComplete+1);assert.equal(held.length,1);assert.equal(await evaluate("document.getElementById('team-select').disabled"),true);
+  mode='';for(const requestId of held)await send('Fetch.continueRequest',{requestId});held=[];await savedStatus('完了');
+  const completed=await prisma.project.findUniqueOrThrow({where:{id:statusProjectId}});assert.equal(completed.status,'DONE');assert.equal(completed.progress,100);
+  let statusRows=await prisma.projectProgressHistory.findMany({where:{projectId:statusProjectId}});assert.equal(statusRows.length,5);const completion=statusRows.find(row=>row.nextStatus==='DONE');assert.equal(completion.previousStatus,'REVIEW');assert.equal(completion.previousProgress,100);assert.equal(completion.nextProgress,100);assert.equal(completion.comment,'架空の完了確認');
+  assert.equal(await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent==='進捗を更新').disabled"),true);checks.push('Actual completion from review+100; double-submit blocked; state/progress/history stored; progress editor disabled');
+  const former=await prisma.teamParticipant.findUniqueOrThrow({where:{teamId_userId:{teamId:data.teamIds[0],userId:auxiliaryUsers[1]}}});await prisma.projectSupportMember.create({data:{teamId:data.teamIds[0],projectId:statusProjectId,participantId:former.id}});await prisma.project.update({where:{id:statusProjectId},data:{version:{increment:1}}});
+  await statusReady('案件を再開');await selectStatus('IN_PROGRESS');const beforeReason=updateRequests;await keyboardSaveEdit();assert.equal(await evaluate("document.activeElement?.id"),'edit-status-comment');assert.equal(updateRequests,beforeReason);
+  await fill('#edit-status-comment','   ');await keyboardSaveEdit();await waitFor("document.querySelector('[data-project-editor] [role=alert]')?.textContent.includes('再開する理由')", 'blank reason');assert.equal(updateRequests,beforeReason);
+  await fill('#edit-status-comment','架空の追加対応が必要なため');await keyboardSaveEdit();await waitFor("!!document.querySelector('[data-project-editor] [class*=reviewPanel]')", 'former assignee rejection');assert.equal(await evaluate("document.getElementById('edit-status-comment').value"),'架空の追加対応が必要なため');assert.equal((await prisma.project.findUniqueOrThrow({where:{id:statusProjectId}})).status,'DONE');
+  await clickText('入力を破棄して詳細へ戻る');await openEditor('担当者を変更','#edit-primary');await waitFor("[...document.querySelectorAll('button')].find(b=>b.textContent==='変更を保存する')?.disabled===false", 'repair candidates');await evaluate(`document.querySelector('[data-project-editor] input[value="${auxiliaryUsers[1]}"]').click()`);await keyboardSaveEdit();await savedStatus('完了');checks.push('Reopen reason required; blank reason sends no request; inactive support rejected; explicit assignee repair');
+  await statusReady('案件を再開');await selectStatus('IN_PROGRESS');await fill('#edit-status-comment','架空の追加対応が必要なため');mode='fail-update';await keyboardSaveEdit();await waitFor("!!document.querySelector('[data-project-editor] [class*=reviewPanel]')", 'reopen 503');assert.equal(await evaluate("document.getElementById('edit-status-comment').value"),'架空の追加対応が必要なため');
+  mode='';await clickText('最新の内容を確認する');await waitFor("[...document.querySelectorAll('button')].some(b=>b.textContent==='比較しました。入力を保持して保存可能にする')", 'reopen compare');await width(1440);await fit();await screenshot('status-reopen-1440');await width(390);await fit();await screenshot('status-reopen-390');
+  await clickText('比較しました。入力を保持して保存可能にする');await keyboardSaveEdit();await savedStatus('進行中');const reopened=await prisma.project.findUniqueOrThrow({where:{id:statusProjectId}});assert.equal(reopened.progress,100);assert.equal(reopened.status,'IN_PROGRESS');statusRows=await prisma.projectProgressHistory.findMany({where:{projectId:statusProjectId}});const reopenRow=statusRows.find(row=>row.previousStatus==='DONE');assert.equal(reopenRow.nextStatus,'IN_PROGRESS');assert.equal(reopenRow.comment,'架空の追加対応が必要なため');assert.equal(reopenRow.previousProgress,reopenRow.nextProgress);checks.push('Reopen 503 retains reason; explicit comparison and retry; progress unchanged and reason stored');
+  await statusReady('状態を変更');await selectStatus('REVIEW');await fill('#edit-status-comment','架空の競合時メモ');await prisma.project.update({where:{id:statusProjectId},data:{status:'ON_HOLD',version:{increment:1}}});await keyboardSaveEdit();await waitFor("!!document.querySelector('[data-project-editor] [class*=reviewPanel]')", 'status conflict');await acceptLatest();
+  assert.equal(await evaluate("document.getElementById('edit-status-comment').value"),'架空の競合時メモ');assert.equal(await evaluate("document.querySelector('#edit-status option[value=REVIEW]').disabled"),true);const beforeInvalidTarget=updateRequests;await keyboardSaveEdit();assert.equal(updateRequests,beforeInvalidTarget);
+  await selectStatus('IN_PROGRESS');await keyboardSaveEdit();await savedStatus('進行中');checks.push('Real status 409 keeps target/reason; latest comparison updates transition rules and prevents invalid retry');
+  await prisma.teamMembership.updateMany({where:{teamId:data.teamIds[0],userId:data.userId},data:{role:'member'}});await prisma.project.update({where:{id:statusProjectId},data:{primaryParticipantId:reassigned.primaryParticipant.id,version:{increment:1}}});
+  await statusReady('状態を変更');await selectStatus('REVIEW');await fill('#edit-status-comment','権限外の状態変更');await keyboardSaveEdit();await waitFor("!!document.querySelector('[data-project-editor] [role=alert]')", 'state permission');assert.equal(await evaluate("document.getElementById('edit-status-comment').value"),'権限外の状態変更');assert.equal((await prisma.project.findUniqueOrThrow({where:{id:statusProjectId}})).status,'IN_PROGRESS');
+  await clickText('入力を破棄して詳細へ戻る');await prisma.teamMembership.updateMany({where:{teamId:data.teamIds[0],userId:data.userId},data:{role:'admin'}});checks.push('Status API denies ordinary non-assignee and preserves form');
+  await statusReady('状態を変更');await selectStatus('REVIEW');await prisma.session.deleteMany({where:{userId:data.userId}});await keyboardSaveEdit();await waitFor("!!document.getElementById('login-email')", 'status expired session');assert.equal(await evaluate("!!document.querySelector('[data-project-detail]')"),false);await login(data.password);await waitFor("!!document.getElementById('team-select')", 'status login again');checks.push('Expired session during status save clears project and returns to login');
+  const keyboardAction=async label=>{await evaluate(`(()=>{const b=[...document.querySelectorAll('button')].find(b=>b.textContent===${JSON.stringify(label)});b.focus();})()`);await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13,text:'\r'});await send('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});};
+  const openRow=async id=>{await waitFor(`!!document.querySelector('[data-project-id="${id}"]')`, 'archive row');await evaluate(`document.querySelector('[data-project-id="${id}"] button').click()`);await waitFor("!!document.querySelector('[data-project-detail] dl')", 'archive detail');};
+  const openArchiveEditor=async()=>{await clickText('アーカイブする');await waitFor("!!document.querySelector('[data-project-editor=archive] form')", 'archive confirmation');};
+  await selectTeam(data.teamIds[0]);await openRow(statusProjectId);const beforeArchive=await prisma.project.findUniqueOrThrow({where:{id:statusProjectId}});const beforeArchiveHistory=await prisma.projectProgressHistory.count({where:{projectId:statusProjectId}});
+  await openArchiveEditor();await prisma.project.update({where:{id:statusProjectId},data:{name:'保管前の競合更新',version:{increment:1}}});await keyboardAction('アーカイブを確定する');await waitFor("!!document.querySelector('[data-project-editor] [class*=reviewPanel]')", 'archive conflict');assert.equal((await prisma.project.findUniqueOrThrow({where:{id:statusProjectId}})).archivedAt,null);await acceptLatest();
+  mode='fail-update';await keyboardAction('アーカイブを確定する');await waitFor("!!document.querySelector('[data-project-editor] [class*=reviewPanel]')", 'archive 503');mode='';await acceptLatest();
+  await width(1440);await fit();await screenshot('archive-confirm-1440');await width(390);await fit();await screenshot('archive-confirm-390');
+  mode='hold-update';const beforeArchiveRequests=updateRequests;await evaluate("(()=>{const b=[...document.querySelectorAll('button')].find(b=>b.textContent==='アーカイブを確定する');b.click();b.click();})()");for(let i=0;i<60&&held.length===0;i++)await new Promise(r=>setTimeout(r,50));assert.equal(held.length,1);assert.equal(updateRequests,beforeArchiveRequests+1);assert.equal(await evaluate("document.getElementById('team-select').disabled && [...document.querySelectorAll('button')].filter(b=>['通常の案件','保管一覧'].includes(b.textContent)).every(b=>b.disabled)"),true);
+  mode='';for(const requestId of held)await send('Fetch.continueRequest',{requestId});held=[];await waitFor("document.body.textContent.includes('アーカイブしました。') && !document.querySelector('[data-project-detail]')", 'archived');
+  const archivedRecord=await prisma.project.findUniqueOrThrow({where:{id:statusProjectId}});assert.ok(archivedRecord.archivedAt);assert.equal(archivedRecord.status,beforeArchive.status);assert.equal(archivedRecord.progress,beforeArchive.progress);assert.equal(await prisma.projectProgressHistory.count({where:{projectId:statusProjectId}}),beforeArchiveHistory);assert.equal(await evaluate(`fetch('/api/siteflow/teams/${data.teamIds[0]}/projects/${statusProjectId}').then(r=>r.status)`),404);assert.equal(await evaluate("document.activeElement?.id"),'projects-title');checks.push('Archive conflict/503 review and retry; one POST and locks; record/history/state retained; normal GET 404');
+  await keyboardAction('保管一覧');await openRow(statusProjectId);assert.equal(await evaluate("document.querySelector('#detail-title').textContent"),'保管案件の詳細');assert.equal(await evaluate("[...document.querySelectorAll('button')].some(b=>['基本情報を編集','進捗を更新','状態を変更','アーカイブする'].includes(b.textContent))"),false);
+  await clickText('進捗・状態の履歴');await waitFor("document.querySelectorAll('[data-related-id]').length>0", 'archived history');assert.equal(await evaluate("document.body.textContent.includes('架空の追加対応が必要なため')"),true);await width(1440);await fit();await screenshot('archive-detail-1440');await width(390);await fit();await screenshot('archive-detail-390');
+  const archivedBoundary=await evaluate(`Promise.all([fetch('/api/siteflow/teams/${data.teamIds[1]}/archived-projects/${statusProjectId}').then(r=>r.status),fetch('/api/siteflow/teams/${data.teamIds[1]}/archived-projects/${statusProjectId}/progress-history').then(r=>r.status),fetch('/api/siteflow/teams/${data.teamIds[0]}/archived-projects/${statusProjectId}',{method:'PATCH',headers:{'Content-Type':'application/json'},body:'{}'}).then(r=>r.status)])`);assert.deepEqual(archivedBoundary,[404,404,405]);checks.push('Archived read-only detail/history with cross-team boundary and update denial; 1440/390');
+  await prisma.teamMembership.deleteMany({where:{teamId:data.teamIds[0],userId:auxiliaryUsers[0]}});await clickText('復元する');await waitFor("!!document.querySelector('[data-project-editor=restore] #edit-primary') && [...document.querySelectorAll('button')].find(b=>b.textContent==='担当を確認して復元する')?.disabled===false", 'restore candidates');await keyboardAction('担当を確認して復元する');await waitFor("!!document.querySelector('[data-project-editor] [class*=reviewPanel]')", 'inactive primary restore');assert.equal(await evaluate("document.getElementById('edit-primary').value"),auxiliaryUsers[0]);assert.ok((await prisma.project.findUniqueOrThrow({where:{id:statusProjectId}})).archivedAt);
+  const moreCandidate=await evaluate("[...document.querySelectorAll('button')].some(b=>b.textContent==='担当候補の続きを取得する')");if(moreCandidate){await clickText('担当候補の続きを取得する');await waitFor(`!!document.querySelector('#edit-primary option[value="${data.userId}"]')`, 'restore own candidate');}
+  await evaluate(`(()=>{const e=document.getElementById('edit-primary');e.value=${JSON.stringify(data.userId)};e.dispatchEvent(new Event('change',{bubbles:true}));})()`);await acceptLatest();mode='fail-update';await keyboardAction('担当を確認して復元する');await waitFor("!!document.querySelector('[data-project-editor] [class*=reviewPanel]')", 'restore 503');assert.equal(await evaluate("document.getElementById('edit-primary').value"),data.userId);mode='';await acceptLatest();
+  await width(1440);await fit();await screenshot('archive-restore-1440');await width(390);await fit();await screenshot('archive-restore-390');const assignmentCount=await prisma.projectAssignmentHistory.count({where:{projectId:statusProjectId}});await keyboardAction('担当を確認して復元する');await waitFor("document.body.textContent.includes('復元しました。') && document.body.textContent.includes('保管した案件はまだありません')", 'restored');
+  const restoredRecord=await prisma.project.findUniqueOrThrow({where:{id:statusProjectId},include:{primaryParticipant:true}});assert.equal(restoredRecord.archivedAt,null);assert.equal(restoredRecord.primaryParticipant.userId,data.userId);assert.equal(restoredRecord.status,beforeArchive.status);assert.equal(restoredRecord.progress,beforeArchive.progress);assert.equal(await prisma.projectAssignmentHistory.count({where:{projectId:statusProjectId}}),assignmentCount+1);assert.equal(await prisma.projectProgressHistory.count({where:{projectId:statusProjectId}}),beforeArchiveHistory);checks.push('Inactive primary restore rejected; selection retained after 503; replacement primary and restore saved with exact history');
+  await selectTeam(data.teamIds[1]);await openRow(minimal.id);const doneBefore=await prisma.project.findUniqueOrThrow({where:{id:minimal.id}});assert.equal(doneBefore.status,'DONE');await openArchiveEditor();await keyboardAction('アーカイブを確定する');await waitFor("document.body.textContent.includes('アーカイブしました。')", 'done archived');await clickText('保管一覧');await openRow(minimal.id);await clickText('復元する');await waitFor("!!document.querySelector('#edit-primary') && [...document.querySelectorAll('button')].find(b=>b.textContent==='担当を確認して復元する')?.disabled===false", 'done restore ready');await keyboardAction('担当を確認して復元する');await waitFor("document.body.textContent.includes('復元しました。')", 'done restored');const doneAfter=await prisma.project.findUniqueOrThrow({where:{id:minimal.id}});assert.equal(doneAfter.status,'DONE');assert.equal(doneAfter.progress,doneBefore.progress);assert.equal(doneAfter.archivedAt,null);checks.push('Completed project archive/restore keeps DONE and progress; restoration does not reopen');
+  await prisma.project.updateMany({where:{teamId:data.teamIds[0],id:{in:data.projectIds}},data:{archivedAt:new Date(),version:{increment:1}}});await selectTeam(data.teamIds[0]);mode='fail-archives';await clickText('保管一覧');await waitFor("!!document.querySelector('[role=alert]')", 'archive list failure');mode='';await clickText('案件を再取得する');await waitFor("document.querySelectorAll('[data-project-id]').length===20", 'archive page 1');await clickText('続きを読み込む');await waitFor("document.querySelectorAll('[data-project-id]').length===21", 'archive page 2');assert.equal(await evaluate("new Set([...document.querySelectorAll('[data-project-id]')].map(e=>e.dataset.projectId)).size"),21);
+  await selectTeam(data.teamIds[1]);await clickText('保管一覧');await waitFor("document.body.textContent.includes('保管した案件はまだありません')", 'archive zero');checks.push('Archived list failure retry, 20+1 without duplicates, and zero results');
+  await selectTeam(data.teamIds[0]);mode='hold-archives';await clickText('保管一覧');for(let i=0;i<60&&held.length===0;i++)await new Promise(r=>setTimeout(r,50));assert.ok(held.length);await clickText('通常の案件');await waitFor(`!!document.querySelector('[data-project-id="${saved.id}"]')`, 'normal while archive pending');mode='';for(const requestId of held)await send('Fetch.continueRequest',{requestId}).catch(()=>{});held=[];await new Promise(r=>setTimeout(r,300));assert.equal(await evaluate("document.querySelector('#projects-title').textContent"),'案件一覧');assert.equal(await evaluate("document.querySelectorAll('[data-project-id]').length"),1);checks.push('Late archive response cannot overwrite normal collection; team changes reset selection');
+  await prisma.teamMembership.updateMany({where:{teamId:data.teamIds[0],userId:data.userId},data:{role:'member'}});
+  await openRow(saved.id);
+  assert.equal(await evaluate("[...document.querySelectorAll('button')].some(b=>b.textContent==='アーカイブする')"),false);
+  const supportActor=await prisma.teamParticipant.findFirstOrThrow({where:{teamId:data.teamIds[0],userId:data.userId}});
+  await prisma.projectSupportMember.createMany({data:[{teamId:data.teamIds[0],projectId:saved.id,participantId:supportActor.id}],skipDuplicates:true});
+  await clickText('一覧へ戻る');await openRow(saved.id);
+  assert.equal(await evaluate("[...document.querySelectorAll('button')].some(b=>b.textContent==='アーカイブする')"),false);
+  const deniedArchive=await prisma.project.findUniqueOrThrow({where:{id:saved.id}});
+  assert.equal(await evaluate(`fetch('/api/siteflow/teams/${data.teamIds[0]}/projects/${saved.id}/archive',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({expectedVersion:${deniedArchive.version}})}).then(r=>r.status)`),403);
+  assert.deepEqual(await prisma.project.findUniqueOrThrow({where:{id:saved.id}}),deniedArchive);
+  for(const size of [1440,390]){await width(size);await fit();await screenshot(`archive-denied-support-${size}`);}
+  await prisma.teamMembership.updateMany({where:{teamId:data.teamIds[0],userId:data.userId},data:{role:'admin'}});
+  checks.push('Ordinary member and support assignee have no archive button; direct API returns 403 without mutation; 1440/390');
+  await clickText('保管一覧');await openRow(data.projectIds[3]);await clickText('復元する');await waitFor("!!document.querySelector('#edit-primary') && [...document.querySelectorAll('button')].find(b=>b.textContent==='担当を確認して復元する')?.disabled===false", 'restore expire ready');await prisma.session.deleteMany({where:{userId:data.userId}});await keyboardAction('担当を確認して復元する');await waitFor("!!document.getElementById('login-email')", 'restore expired');assert.equal(await evaluate("!!document.querySelector('[data-project-detail]')"),false);await login(data.password);await waitFor("!!document.getElementById('team-select')", 'restore login again');checks.push('Expired restore session clears archived data and returns to login');
+  // 一件の案件を画面から作り、同じ案件の業務の流れを最後まで確認する。
+  await selectTeam(data.teamIds[0]);await waitFor("[...document.querySelectorAll('button')].some(b=>b.textContent==='新しい案件を登録')",'journey list');await clickText('新しい案件を登録');await waitFor("!!document.getElementById('project-name')",'journey create');
+  await fill('#project-name','架空の通し確認案件');await fill('#project-code','FLOW-POLISH');await fill('#project-due','2026-01-01');await waitFor("[...document.querySelectorAll('button')].find(b=>b.textContent==='案件を登録する')?.disabled===false",'journey ready');
+  if(!await evaluate(`!!document.querySelector('#project-primary option[value="${data.userId}"]')`)){await clickText('担当候補の続きを取得する');await waitFor(`!!document.querySelector('#project-primary option[value="${data.userId}"]')`,'journey initial primary');}
+  await evaluate(`(()=>{const s=document.getElementById('project-primary');s.value=${JSON.stringify(data.userId)};s.dispatchEvent(new Event('change',{bubbles:true}));})()`);await keyboardAction('案件を登録する');await waitFor("!!document.querySelector('[data-project-detail] dl')",'journey created');
+  const journey=await prisma.project.findFirstOrThrow({where:{teamId:data.teamIds[0],code:'FLOW-POLISH'}});
+  await openEditor('基本情報を編集','#edit-name');assert.equal(await evaluate('document.activeElement?.id'),'editor-title');await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Tab',code:'Tab',windowsVirtualKeyCode:9});await send('Input.dispatchKeyEvent',{type:'keyUp',key:'Tab',code:'Tab',windowsVirtualKeyCode:9});assert.equal(await evaluate('document.activeElement?.textContent'),'入力を破棄して戻る');await fill('#edit-clientName','架空の確認用クライアント');await keyboardSaveEdit();await savedStatus('未着手');
+  await openEditor('担当者を変更','#edit-primary');await waitFor("[...document.querySelectorAll('button')].find(b=>b.textContent==='変更を保存する')?.disabled===false",'journey members');
+  if(!await evaluate(`!!document.querySelector('#edit-primary option[value="${extraCandidates[0].id}"]')`)){await clickText('担当候補の続きを取得する');await waitFor(`!!document.querySelector('#edit-primary option[value="${extraCandidates[0].id}"]')`,'journey candidate page');}
+  await evaluate(`(()=>{const s=document.getElementById('edit-primary');s.value=${JSON.stringify(extraCandidates[0].id)};s.dispatchEvent(new Event('change',{bubbles:true}));})()`);await waitFor(`!!document.querySelector('[data-project-editor] input[value="${data.userId}"]')`,'journey support');await evaluate(`document.querySelector('[data-project-editor] input[value="${data.userId}"]').focus()`);await send('Input.dispatchKeyEvent',{type:'keyDown',key:' ',code:'Space',windowsVirtualKeyCode:32,text:' '});await send('Input.dispatchKeyEvent',{type:'keyUp',key:' ',code:'Space',windowsVirtualKeyCode:32});assert.equal(await evaluate(`document.querySelector('[data-project-editor] input[value="${data.userId}"]').checked`),true);await keyboardSaveEdit();await savedStatus('未着手');
+  await statusReady('状態を変更');await selectStatus('IN_PROGRESS');await keyboardSaveEdit();await savedStatus('進行中');await openEditor('進捗を更新','#edit-progress');await fill('#edit-progress','60');await fill('#edit-comment','架空の中間確認');await keyboardSaveEdit();await savedStatus('進行中');
+  await statusReady('状態を変更');await selectStatus('REVIEW');await keyboardSaveEdit();await savedStatus('確認待ち');await openEditor('進捗を更新','#edit-progress');await fill('#edit-progress','100');await keyboardSaveEdit();await savedStatus('確認待ち');await statusReady('状態を変更');await selectStatus('DONE');await keyboardSaveEdit();await savedStatus('完了');
+  await openArchiveEditor();await keyboardAction('アーカイブを確定する');await waitFor("!document.querySelector('[data-project-detail]') && document.body.textContent.includes('アーカイブしました。')",'journey archived');await clickText('保管一覧');await openRow(journey.id);await clickText('復元する');await waitFor("[...document.querySelectorAll('button')].find(b=>b.textContent==='担当を確認して復元する')?.disabled===false",'journey restore');await keyboardAction('担当を確認して復元する');await waitFor("!document.querySelector('[data-project-detail]') && document.body.textContent.includes('復元しました。')",'journey restored');assert.equal((await prisma.project.findUniqueOrThrow({where:{id:journey.id}})).status,'DONE');
+  await clickText('通常の案件');await openRow(journey.id);await statusReady('案件を再開');await selectStatus('IN_PROGRESS');await fill('#edit-status-comment','架空の追加確認のため再開');await keyboardSaveEdit();await savedStatus('進行中');await openEditor('進捗を更新','#edit-progress');await fill('#edit-progress','70');await fill('#edit-comment','架空の追加確認を反映');await keyboardSaveEdit();await savedStatus('進行中');
+  await send('Page.reload',{ignoreCache:true});await waitFor("!!document.getElementById('team-select')",'journey reload');await selectTeam(data.teamIds[0]);await openRow(journey.id);const journeySaved=await prisma.project.findUniqueOrThrow({where:{id:journey.id},include:{primaryParticipant:true}});assert.equal(journeySaved.status,'IN_PROGRESS');assert.equal(journeySaved.progress,70);assert.equal(journeySaved.clientName,'架空の確認用クライアント');assert.equal(journeySaved.primaryParticipant.userId,extraCandidates[0].id);assert.equal(journeySaved.archivedAt,null);assert.ok(await prisma.projectProgressHistory.findFirst({where:{projectId:journey.id,comment:'架空の追加確認のため再開'}}));checks.push('One-case UI journey: create/edit/assign/progress/review/complete/archive/restore/reopen/reload; keyboard heading, Tab and support Space');
+  mode='hold-editor';await clickText('基本情報を編集');for(let i=0;i<60&&held.length===0;i++)await new Promise(r=>setTimeout(r,50));assert.ok(held.length);await keyboardAction('入力を破棄して戻る');mode='';for(const requestId of held)await send('Fetch.continueRequest',{requestId}).catch(()=>{});held=[];await new Promise(r=>setTimeout(r,300));assert.equal(await evaluate("!!document.querySelector('[data-project-editor]')"),false);assert.equal(await evaluate('document.activeElement?.id'),'detail-title');checks.push('Keyboard cancel during initial editor GET; late response cannot reopen editor; focus returns to detail');
+  await clickText('一覧へ戻る');await waitFor("!!document.getElementById('projects-title')",'portfolio list');for(const size of [1440,360]){await width(size);await fit();await evaluate('window.scrollTo(0,0)');await new Promise(r=>setTimeout(r,150));const shot=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});fs.writeFileSync(path.join(output,`portfolio-${size}.png`),Buffer.from(shot.data,'base64'));}
+  mode = 'fail-logout'; await clickText('ログアウト'); await waitFor("!!document.querySelector('[role=alert]')", 'logout failure'); assert.equal(await evaluate("!!document.getElementById('team-select')"), true);
+  mode = ''; await clickText('ログアウト'); await waitFor("!!document.getElementById('login-email')", 'logout');
+  assert.equal(await evaluate("fetch('/api/siteflow/teams',{cache:'no-store'}).then(r=>r.status)"), 401);
+  await send('Page.reload', { ignoreCache: true }); await waitFor("!!document.getElementById('login-email')", 'logged-out reload'); checks.push('Logout failure retry; logout invalidates old session');
+  fs.writeFileSync(path.join(output, 'results.json'), JSON.stringify({ checks, passed: true }, null, 2));
+  console.log('PASS: ' + checks.length + ' browser scenarios; screenshots in work/workspace-preview; temporary DB fixture removed on exit');
+} catch (error) {
+  if (send && ws?.readyState === WebSocket.OPEN) {
+    const shot = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true }).catch(() => null);
+    if (shot) fs.writeFileSync(path.join(output, 'failure.png'), Buffer.from(shot.data, 'base64'));
+  }
+  console.error(error instanceof Error ? error.message : 'Workspace browser check failed'); process.exitCode = 1;
+} finally {
+  if (send && ws?.readyState === WebSocket.OPEN) { mode = ''; for (const requestId of held) await send('Fetch.continueRequest', { requestId }).catch(() => {}); await send('Browser.close').catch(() => {}); ws.close(); }
+  child?.kill();
+  // 自分で作った専用プロファイルだけを削除する。通常のChrome設定は触らない。
+  if (profile.startsWith(path.join(os.tmpdir(), 'siteflow-workspace-chrome-'))) {
+    await fs.promises.rm(profile, { recursive: true, force: true, maxRetries: 8, retryDelay: 250 }).catch(() => {});
+  }
+  if (data) await removeLocalWorkspaceData(prisma, data);
+  if (auxiliaryUsers.length) await prisma.user.deleteMany({ where: { id: { in: auxiliaryUsers } } });
+  await prisma.$disconnect();
+}

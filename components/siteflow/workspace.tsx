@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState, useSyncExternalStore, type FormEvent } from "react";
 import { Building2, MapPin, Plus, ClipboardList, CalendarDays, CheckCheck, CircleAlert, ChevronRight, HardHat, UserRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
@@ -14,6 +14,20 @@ import { availableTransitions, changeStatus, completionRate, isOverdue, members,
 import { projects, seedIssues } from "@/lib/siteflow/seed";
 
 const transitionLabels: Record<Status, string> = { open: "未対応", in_progress: "対応を開始", review: "確認を依頼", done: "承認して完了" };
+
+// 日付はReactの状態ではなく、ブラウザーの時計から読み取る。
+function subscribeToToday(onChange: () => void) {
+  const interval = window.setInterval(onChange, 60_000);
+  window.addEventListener("focus", onChange);
+  return () => {
+    window.clearInterval(interval);
+    window.removeEventListener("focus", onChange);
+  };
+}
+
+// サーバー描画とブラウザーの初回描画で同じ値にする。
+function getServerToday() { return ""; }
+
 function StatusBadge({ status }: { status: Status }) { return <span className={`status status-${status}`}>{statusLabels[status]}</span>; }
 function Choice({ value, onChange, label, options }: { value: string; onChange: (v: string) => void; label: string; options: { value: string; label: string }[] }) {
   return <Select value={value} onValueChange={onChange}><SelectTrigger aria-label={label} className="choice"><SelectValue /></SelectTrigger><SelectContent>{options.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent></Select>;
@@ -28,9 +42,8 @@ export function Workspace() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [response, setResponse] = useState("");
   const [error, setError] = useState("");
-  const [today, setToday] = useState("");
+  const today = useSyncExternalStore(subscribeToToday, todayInTokyo, getServerToday);
   const [draft, setDraft] = useState({ title: "", location: "", assignee: members[0], dueDate: "", priority: "normal", description: "" });
-  useEffect(() => { setToday(todayInTokyo()); }, []);
   const project = projects.find(p => p.id === projectId)!;
   const projectIssues = issues.filter(i => i.projectId === projectId);
   const visible = projectIssues.filter(i => filter === "all" || (filter === "overdue" ? isOverdue(i, today) : i.status === filter));

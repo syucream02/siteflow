@@ -10,19 +10,45 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
+concurrency:
+  group: siteflow-ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   docker-build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.publish.outputs.digest }}
+      migration_digest: ${{ steps.publish.outputs.migration_digest }}
 
     steps:
       - name: Checkout source code
         uses: actions/checkout@v4
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Test immutable image identity and release switch
+        run: node --test tests/image-record.test.mjs
+
+      - name: Validate production Compose configuration
+        run: node scripts/check-deploy-config.mjs
+
       - name: Build Docker image
-        run: docker build -t siteflow:ci .
+        run: docker build --label "org.opencontainers.image.revision=$GITHUB_SHA" -t siteflow:ci .
+
+      - name: Build and test deployment tools
+        run: |
+          docker build --target deploy-check -t siteflow:deploy-check .
+          docker run --rm --network none --memory 512m --memory-swap 512m --ulimit core=0 siteflow:deploy-check
+
+      - name: Build migration image
+        run: docker build --target migration --label "org.opencontainers.image.revision=$GITHUB_SHA" -t siteflow:migration .
 
       - name: Run unit tests
         run: docker run --rm siteflow:ci node --test tests/domain.test.mjs
@@ -46,6 +72,10 @@ jobs:
         if: failure()
         run: docker logs siteflow-ci
 
+      - name: Remove smoke container
+        if: always()
+        run: docker rm -f siteflow-ci 2>/dev/null || true
+
       - name: Log in to GitHub Container Registry
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: docker/login-action@v3
@@ -55,8 +85,45 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Tag and push Docker image
+        id: publish
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           IMAGE_NAME="ghcr.io/${GITHUB_REPOSITORY,,}"
           docker tag siteflow:ci "$IMAGE_NAME:${GITHUB_SHA}"
           docker push "$IMAGE_NAME:${GITHUB_SHA}"
+          docker tag siteflow:migration "$IMAGE_NAME:${GITHUB_SHA}-migration"
+          docker push "$IMAGE_NAME:${GITHUB_SHA}-migration"
+          node deploy/image-record.mjs
+
+  release-approved:
+    needs: docker-build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      # productionの保護はGitHub側で先に設定する。名前だけでは承認必須にならない。
+      - name: Check release permission switch
+        id: release-switch
+        env:
+          SITEFLOW_RELEASE_ENABLED: ${{ vars.SITEFLOW_RELEASE_ENABLED }}
+        run: node deploy/release-record.mjs --check-gate
+      - name: Record approved immutable images
+        if: steps.release-switch.outputs.enabled == 'true'
+        env:
+          SITEFLOW_RELEASE_ENABLED: ${{ vars.SITEFLOW_RELEASE_ENABLED }}
+          SITEFLOW_IMAGE_DIGEST: ${{ needs.docker-build.outputs.digest }}
+          SITEFLOW_MIGRATION_DIGEST: ${{ needs.docker-build.outputs.migration_digest }}
+        run: node deploy/release-record.mjs
+      - uses: actions/upload-artifact@v4
+        if: steps.release-switch.outputs.enabled == 'true'
+        with:
+          name: approved-release-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: approved-release.json
+          if-no-files-found: error
+          retention-days: 30

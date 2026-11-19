@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "incremental": false
+  },
+  "include": ["next-env.d.ts", "check.ts", "database.ts", "auth-check.ts", "team-service.ts", "project-service.ts", "json-body.ts", "prisma7.config.ts", "prisma-design.config.ts", "prisma-schema-check.config.ts", "schema-auth.config.ts", "app/**/*.ts", "app/**/*.tsx", ".next/types/**/*.ts", ".next/dev/types/**/*.ts"],
+  "exclude": ["node_modules"],
+  "files": ["prepare-workspace.ts", "local-workspace-data.ts", "public-api-settings.ts", "public-api.ts", "prisma-backup-check.config.ts"]
+}

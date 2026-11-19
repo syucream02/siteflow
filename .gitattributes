@@ -1,0 +1,3 @@
+# WindowsのcheckoutでもLinux用の配信ファイルはLFを維持する。
+deploy/*.sh text eol=lf
+deploy/*.inc text eol=lf

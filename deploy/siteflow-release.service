@@ -1,0 +1,19 @@
+[Unit]
+Description=SiteFlow approved release only (not installed or enabled by this file)
+Requires=docker.service
+After=docker.service
+RequiresMountsFor=/srv/siteflow-mysql
+BindsTo=srv-siteflow\x2dmysql.mount
+After=srv-siteflow\x2dmysql.mount
+ConditionPathExists=/srv/siteflow-mysql/release/enabled
+
+[Service]
+Type=oneshot
+UMask=0077
+MemoryMax=256M
+MemorySwapMax=0
+LimitCORE=0
+TimeoutStartSec=600
+ExecStart=/usr/local/lib/siteflow/cd-check.sh /srv/siteflow-mysql/release/settings.json /srv/siteflow-mysql/secrets/github-read-token
+StandardOutput=null
+StandardError=journal

@@ -1,0 +1,17 @@
+{
+  "Rules": [
+    {
+      "ID": "DailyOldVersionsAndDeleteMarkers",
+      "Status": "Enabled",
+      "Filter": {
+        "Prefix": "daily/"
+      },
+      "NoncurrentVersionExpiration": {
+        "NoncurrentDays": 30
+      },
+      "Expiration": {
+        "ExpiredObjectDeleteMarker": true
+      }
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "stateDirectory": "/srv/siteflow-mysql/release",
+  "upstreamFile": "/etc/nginx/siteflow/upstream.inc",
+  "runtimeEnvFile": "/srv/siteflow-mysql/config/app-runtime.env",
+  "databasePasswordFile": "/srv/siteflow-mysql/secrets/candidate/db-password",
+  "authSecretFile": "/srv/siteflow-mysql/secrets/candidate/auth-secret",
+  "dataMount": "/srv/siteflow-mysql",
+  "dataFsUuid": "276f374a-7e33-4ff0-b6f4-b0f185280cd6",
+  "dataEbsVolumeId": "vol-01a737715ed956301",
+  "caFile": "/srv/siteflow-mysql/tls/server/ca.pem",
+  "network": "siteflow-production-database",
+  "databaseHost": "mysql.siteflow.test",
+  "databaseName": "siteflow_public_app",
+  "publicOrigin": "https://siteflow.example.com"
+}

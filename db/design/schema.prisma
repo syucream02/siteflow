@@ -1,0 +1,111 @@
+// 学習・構造検証専用の候補。本体・接続検証用スキーマからは読み込まない。
+// マイグレーションやdb pushへ使う前に、認証・入力制約・所属解除を確定する。
+// 進捗率の整数、文字数上限などは未承認の仮置き。認証用の全モデルは未収録。
+datasource db {
+  provider = "mysql"
+}
+
+enum TeamRole {
+  ADMIN
+  MEMBER
+}
+
+enum ProjectStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  REVIEW
+  ON_HOLD
+  DONE
+}
+
+// Better Authとの接続点となる候補。Session / Account / Verificationは別段階。
+// 実際の認証設定・生成スキーマとの照合前なので、認証用の完成版ではない。
+model User {
+  id            String   @id @db.VarChar(191)
+  name          String   @db.VarChar(100)
+  email         String   @unique @db.VarChar(254)
+  emailVerified Boolean  @default(false)
+  image         String?  @db.Text
+  createdAt     DateTime @default(now()) @db.DateTime(3)
+  updatedAt     DateTime @updatedAt @db.DateTime(3)
+
+  memberships TeamMembership[]
+}
+
+model Team {
+  id        String   @id @default(uuid()) @db.Char(36)
+  name      String   @db.VarChar(100)
+  createdAt DateTime @default(now()) @db.DateTime(3)
+  updatedAt DateTime @updatedAt @db.DateTime(3)
+
+  memberships TeamMembership[]
+  projects    Project[]
+}
+
+model TeamMembership {
+  id        String   @id @default(uuid()) @db.Char(36)
+  teamId    String   @db.Char(36)
+  userId    String   @db.VarChar(191)
+  role      TeamRole @default(MEMBER)
+  createdAt DateTime @default(now()) @db.DateTime(3)
+  updatedAt DateTime @updatedAt @db.DateTime(3)
+
+  team Team @relation(fields: [teamId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  primaryProjects Project[]              @relation("ProjectPrimaryMembership")
+  createdProjects Project[]              @relation("ProjectCreatorMembership")
+  supportProjects ProjectSupportMember[]
+
+  // 同じ人の同じチームへの二重所属を禁止する候補。
+  @@unique([teamId, userId])
+  // 複数列の外部キーから「チームと所属」の組合せを参照するために必要。
+  @@unique([teamId, id])
+  @@index([userId])
+}
+
+model Project {
+  id                    String        @id @default(uuid()) @db.Char(36)
+  teamId                String        @db.Char(36)
+  name                  String        @db.VarChar(200)
+  primaryMembershipId   String        @db.Char(36)
+  createdByMembershipId String        @db.Char(36)
+  dueDate               DateTime      @db.Date
+  // Intだけでは0〜100を保証しない。範囲と完了条件の追加制約は未収録。
+  progress              Int           @default(0)
+  status                ProjectStatus @default(NOT_STARTED)
+  code                  String?       @db.VarChar(100)
+  summary               String?       @db.Text
+  clientName            String?       @db.VarChar(200)
+  notes                 String?       @db.Text
+  version               Int           @default(1)
+  archivedAt            DateTime?     @db.DateTime(3)
+  createdAt             DateTime      @default(now()) @db.DateTime(3)
+  updatedAt             DateTime      @updatedAt @db.DateTime(3)
+
+  team                Team           @relation(fields: [teamId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  primaryMembership   TeamMembership @relation("ProjectPrimaryMembership", fields: [teamId, primaryMembershipId], references: [teamId, id], onDelete: Restrict, onUpdate: Restrict)
+  createdByMembership TeamMembership @relation("ProjectCreatorMembership", fields: [teamId, createdByMembershipId], references: [teamId, id], onDelete: Restrict, onUpdate: Restrict)
+
+  supportMembers ProjectSupportMember[]
+
+  @@unique([teamId, id])
+  @@index([teamId, archivedAt, dueDate])
+  @@index([teamId, primaryMembershipId])
+  @@index([teamId, createdByMembershipId])
+}
+
+model ProjectSupportMember {
+  teamId       String   @db.Char(36)
+  projectId    String   @db.Char(36)
+  membershipId String   @db.Char(36)
+  createdAt    DateTime @default(now()) @db.DateTime(3)
+
+  project    Project        @relation(fields: [teamId, projectId], references: [teamId, id], onDelete: Restrict, onUpdate: Restrict)
+  membership TeamMembership @relation(fields: [teamId, membershipId], references: [teamId, id], onDelete: Restrict, onUpdate: Restrict)
+
+  // 同じ案件に同じ副担当を二重登録しない。主担当との重複は別途検証が必要。
+  @@id([projectId, membershipId])
+  @@index([teamId, projectId])
+  @@index([teamId, membershipId])
+}

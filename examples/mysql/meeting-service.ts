@@ -1,0 +1,117 @@
+import { randomUUID } from 'node:crypto';
+import { Prisma, type PrismaClient } from './generated/integrated/client.ts';
+import { canReadTeam, canRunMeeting, meetingProjectLimit, type MeetingAction } from '../../lib/siteflow/domain.ts';
+
+const denied = () => ({ ok: false as const, status: 403, code: 'MEETING_ACCESS_DENIED', message: 'この会議を操作する権限がありません。所属と進行役を確認してください。' });
+const missing = () => ({ ok: false as const, status: 404, code: 'MEETING_NOT_FOUND', message: '会議が見つかりません。' });
+const conflict = () => ({ ok: false as const, status: 409, code: 'MEETING_VERSION_CONFLICT', message: '会議が更新されています。最新の状態を取得し、確認してからもう一度操作してください。' });
+
+async function lockMembership(tx: Prisma.TransactionClient, userId: string, teamId: string, otherUserId?: string | null) {
+  const ids = [...new Set([userId, ...(otherUserId ? [otherUserId] : [])])].sort();
+  return tx.$queryRaw<{ teamId: string; userId: string; role: string }[]>(Prisma.sql`
+    SELECT teamId, userId, role FROM TeamMembership WHERE teamId=${teamId}
+    AND userId IN (${Prisma.join(ids)}) ORDER BY userId FOR UPDATE
+  `);
+}
+
+export async function startMeetingForUser(prisma: PrismaClient, userId: string, teamId: string, facilitatorUserId: string | null) {
+  return prisma.$transaction(async tx => {
+    const memberships = await lockMembership(tx, userId, teamId, facilitatorUserId);
+    if (!canReadTeam(userId, teamId, memberships.find(row => row.userId === userId) ?? null)) return denied();
+    if (facilitatorUserId && !memberships.some(row => row.userId === facilitatorUserId && ['admin', 'member'].includes(row.role))) {
+      return { ok: false as const, status: 400, code: 'INVALID_FACILITATOR', message: '進行役は現在のチーム所属者から選んでください。' };
+    }
+    // 通常一覧の1ページを流用しない。上限超過も、黙って切り捨てず拒否する。
+    const projects = await tx.project.findMany({ where: { teamId, archivedAt: null }, orderBy: [{ dueDate: 'asc' }, { id: 'asc' }],
+      take: meetingProjectLimit + 1, select: { id: true, name: true } });
+    if (!projects.length || projects.length > meetingProjectLimit) return { ok: false as const, status: 409, code: 'MEETING_TARGET_COUNT', message: `対象案件は1〜${meetingProjectLimit}件にしてください。保管中の案件は対象外です。` };
+    const people = new Map<string, string>();
+    for (const id of [...new Set([userId, ...(facilitatorUserId ? [facilitatorUserId] : [])])].sort()) {
+      const person = await tx.teamParticipant.upsert({ where: { teamId_userId: { teamId, userId: id } }, create: { teamId, userId: id }, update: {}, select: { id: true } });
+      people.set(id, person.id);
+    }
+    const meeting = await tx.meeting.create({ data: { id: randomUUID(), teamId, createdByParticipantId: people.get(userId)!,
+      facilitatorParticipantId: facilitatorUserId ? people.get(facilitatorUserId)! : null }, select: { id: true, version: true } });
+    await tx.meetingProject.createMany({ data: projects.map((project, position) => ({ id: randomUUID(), teamId, meetingId: meeting.id,
+      projectId: project.id, position, nameSnapshot: project.name })) });
+    return { ok: true as const, meeting };
+  });
+}
+
+export async function readMeetingForUser(prisma: PrismaClient, userId: string, teamId: string, meetingId: string) {
+  return prisma.$transaction(async tx => {
+    const memberships = await lockMembership(tx, userId, teamId);
+    const membership = memberships.find(row => row.userId === userId) ?? null;
+    if (!canReadTeam(userId, teamId, membership)) return denied();
+    // 確認・取消・終了の途中を混ぜず、件数と対象を同じ状態から返す。
+    await tx.$queryRaw(Prisma.sql`SELECT id FROM Meeting WHERE teamId=${teamId} AND id=${meetingId} FOR UPDATE`);
+    const meeting = await tx.meeting.findFirst({ where: { id: meetingId, teamId }, select: {
+      id: true, version: true, startedAt: true, endedAt: true,
+      facilitator: { select: { userId: true, user: { select: { name: true } } } },
+      projects: { orderBy: { position: 'asc' }, select: { id: true, projectId: true, nameSnapshot: true,
+        project: { select: { name: true, dueDate: true, progress: true, status: true, archivedAt: true, primaryParticipant: { select: { user: { select: { name: true } } } } } },
+        confirmations: { where: { revokedAt: null }, orderBy: [{ confirmedAt: 'desc' }, { id: 'desc' }], take: 1,
+          select: { id: true, progress: true, status: true, projectVersion: true, confirmedAt: true, confirmedByNameSnapshot: true } },
+        _count: { select: { confirmations: true } },
+      } },
+    } });
+    if (!meeting) return missing();
+    const entries = meeting.projects.map(entry => ({ id: entry.id, projectId: entry.projectId, nameAtStart: entry.nameSnapshot,
+      project: { name: entry.project.name, dueDate: entry.project.dueDate.toISOString().slice(0, 10), progress: entry.project.progress,
+        status: entry.project.status, archived: entry.project.archivedAt !== null, primaryName: entry.project.primaryParticipant.user.name },
+      confirmation: entry.confirmations[0] ?? null, auditCount: entry._count.confirmations }));
+    const confirmed = entries.filter(entry => entry.confirmation !== null).length;
+    return { ok: true as const, meeting: { id: meeting.id, version: meeting.version, startedAt: meeting.startedAt, endedAt: meeting.endedAt,
+      facilitator: meeting.facilitator ? { userId: meeting.facilitator.userId, name: meeting.facilitator.user.name } : null,
+      canOperate: !meeting.endedAt && canRunMeeting(userId, teamId, membership, meeting.facilitator?.userId ?? null),
+      counts: { total: entries.length, confirmed, unconfirmed: entries.length - confirmed }, entries } };
+  });
+}
+
+export async function actOnMeetingForUser(prisma: PrismaClient, userId: string, teamId: string, meetingId: string, input: MeetingAction) {
+  return prisma.$transaction(async tx => {
+    const memberships = await lockMembership(tx, userId, teamId, input.action === 'facilitator' ? input.facilitatorUserId : null);
+    const membership = memberships.find(row => row.userId === userId) ?? null;
+    if (!canReadTeam(userId, teamId, membership)) return denied();
+    await tx.$queryRaw(Prisma.sql`SELECT id FROM Meeting WHERE teamId=${teamId} AND id=${meetingId} FOR UPDATE`);
+    const meeting = await tx.meeting.findFirst({ where: { id: meetingId, teamId }, select: { version: true, endedAt: true, facilitator: { select: { userId: true } } } });
+    if (!meeting) return missing();
+    if (!canRunMeeting(userId, teamId, membership, meeting.facilitator?.userId ?? null)) return denied();
+    if (meeting.endedAt) return { ok: false as const, status: 409, code: 'MEETING_ENDED', message: '終了した会議の確認記録は変更できません。' };
+    if (meeting.version !== input.expectedVersion) return conflict();
+    if (input.action === 'facilitator' && input.facilitatorUserId && !memberships.some(row => row.userId === input.facilitatorUserId && ['admin', 'member'].includes(row.role))) {
+      return { ok: false as const, status: 400, code: 'INVALID_FACILITATOR', message: '進行役は現在のチーム所属者から選んでください。' };
+    }
+    if (input.action === 'finish' && !input.allowUnconfirmed) {
+      const remaining = await tx.meetingProject.count({ where: { teamId, meetingId, confirmations: { none: { revokedAt: null } } } });
+      if (remaining) return { ok: false as const, status: 409, code: 'UNCONFIRMED_PROJECTS', message: `未確認の案件が${remaining}件あります。一覧を確認してから終了してください。` };
+    }
+    const actor = await tx.teamParticipant.upsert({ where: { teamId_userId: { teamId, userId } }, create: { teamId, userId }, update: {}, select: { id: true, user: { select: { name: true } } } });
+    let facilitatorParticipantId: string | null | undefined;
+    if (input.action === 'facilitator') {
+      facilitatorParticipantId = input.facilitatorUserId ? (await tx.teamParticipant.upsert({ where: { teamId_userId: { teamId, userId: input.facilitatorUserId } },
+        create: { teamId, userId: input.facilitatorUserId }, update: {}, select: { id: true } })).id : null;
+    }
+    if (input.action === 'confirm' || input.action === 'unconfirm') {
+      const entry = await tx.meetingProject.findFirst({ where: { id: input.entryId, teamId, meetingId }, select: { projectId: true } });
+      if (!entry) return { ok: false as const, status: 404, code: 'MEETING_ENTRY_NOT_FOUND', message: 'この会議の対象案件が見つかりません。' };
+      const existing = await tx.meetingConfirmation.findFirst({ where: { teamId, entryId: input.entryId, revokedAt: null }, select: { id: true } });
+      if ((input.action === 'confirm') === Boolean(existing)) return { ok: true as const, meeting: { id: meetingId, version: meeting.version }, changed: false };
+      if (input.action === 'confirm') {
+        await tx.$queryRaw(Prisma.sql`SELECT id FROM Project WHERE teamId=${teamId} AND id=${entry.projectId} FOR UPDATE`);
+        const project = await tx.project.findFirstOrThrow({ where: { id: entry.projectId, teamId }, select: { progress: true, status: true, version: true } });
+        await tx.meetingConfirmation.create({ data: { id: randomUUID(), teamId, entryId: input.entryId, progress: project.progress, status: project.status,
+          projectVersion: project.version, confirmedByParticipantId: actor.id, confirmedByNameSnapshot: actor.user.name } });
+      } else {
+        // 値や確認者は消さず、取消者・取消日時を加えて監査用に保持する。
+        await tx.meetingConfirmation.update({ where: { id: existing!.id }, data: { revokedAt: new Date(), revokedByParticipantId: actor.id, revokedByNameSnapshot: actor.user.name } });
+      }
+    }
+    const saved = await tx.meeting.updateMany({ where: { id: meetingId, teamId, version: input.expectedVersion, endedAt: null }, data: {
+      version: { increment: 1 }, ...(input.action === 'finish' ? { endedAt: new Date() } : {}),
+      ...(input.action === 'facilitator' ? { facilitatorParticipantId } : {}),
+    } });
+    if (saved.count !== 1) throw new Error('Locked meeting update failed');
+    return { ok: true as const, meeting: { id: meetingId, version: meeting.version + 1 }, changed: true };
+  });
+}
