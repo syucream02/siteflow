@@ -1,5 +1,9 @@
 # AWSデプロイ準備：変更案と実行順
 
+> 公開用資料：環境固有の識別子・個人PCパスは匿名化。仮値のコマンドはそのまま実行しないでください。公開は手動で、自動デプロイは未導入です。後段のCD関連は過去の設計・ローカル検証を含み、GitHub未反映の資料・コードがあります。
+
+> 最新（2026-11-21 11:58 JST）：**Next.js初回公開と認証・テスト案件の公開HTTPS試験に成功し、公開先は3001。** 検証枠のUIDを所有者1000へ合わせ、mode600・特権削除・秘密保護を維持した。旧Vinext3002は復旧用に稼働継続。実測と残課題は [手動公開記録](MANUAL_PUBLIC_RELEASE.md) を参照。後段の失敗・未公開は履歴として保持。
+
 最新（2026-11-17 21:21 JST）：**PC実Chromeの非公開HTTPSでログイン・案件保存35％・再読み込み・ログアウトに成功**。証明書dry-run/再読込hook/通常renew正常（実証明書の期限延長なし、11月21日15:26 JST）。候補だけの停止再開と保存保持も成功、旧Vinext/Nginxルーティング維持・HTTPS200。S3/IAMは承認待ち、GitHub production未作成、CD/公開経路変更はローカル準備のみ。詳細は[21節](PREDEPLOY_VALIDATION.md#21-公開前準備証明書非公開ブラウザー復旧cd)。後段は過去の履歴を含む。
 
 
@@ -16,9 +20,9 @@
 
 最新のB4手動mount：[32節](#32-承認b4追加ebsの手動mount結果)。新UUIDを/srv/siteflow-mysqlへ接続し3種のprobeで一致、空き約9.84GiB/旧HTTPS200。fstab/Docker/DB/Nextは変更していない。
 
-最新のB3限定実行：[31節](#31-承認b3追加10gibのxfs-format結果)。新EBSだけXFS作成成功、UUID=276f374a-7e33-4ff0-b6f4-b0f185280cd6、未mount。次のmountは別承認。
+最新のB3限定実行：[31節](#31-承認b3追加10gibのxfs-format結果)。新EBSだけXFS作成成功、UUID=<DATA_EBS_UUID>、未mount。次のmountは別承認。
 
-最新の実態：[30節](#30-新ebsのユーザー作成接続とnvme照合)にユーザー手動の新EBS vol-01a737715ed956301作成/attach報告と、06:26 JSTの/dev/nvme1n1/10GiB/同VolumeId/AWS sdf一致・署名/mountなしを記録。B3 format以降は未承認/未実施。
+最新の実態：[30節](#30-新ebsのユーザー作成接続とnvme照合)にユーザー手動の新EBS vol-<VOLUME_ID>作成/attach報告と、06:26 JSTの/dev/nvme1n1/10GiB/同VolumeId/AWS sdf一致・署名/mountなしを記録。B3 format以降は未承認/未実施。
 
 最新のB準備：[29節](#29-b作成前のaz構成確認とconsole設定値)にAZ ap-southeast-2c/既存rootだけを読み取り確認した結果とconsole作成値を記録。**B1作成/B2attach/B3format/B4mountはそれぞれ未承認、変更なし。**
 
@@ -38,7 +42,7 @@ EBS確認後の最新案：gp3/20GiB/暗号化なし/終了時削除「はい」
 
 最新の実行状況：snapshot1件の作成はユーザー承認済みだが、EC2ロールのCreateSnapshot dry-runが拒否され、ブラウザー接続も利用できず**新規snapshot未作成**。20:15 JSTに業務DB不在の再確認/sync/HTTPS確認まで実施。[16節](#16-承認後の事前確認と作成経路の制約)。承認待ちと権限制約を混同しない。
 
-その後の完了確認：ユーザーが新snapshot `snap-0e59ef6e9a1635889` の完了/100％と旧snapshot保持をコンソール確認した（[17節](#17-最新スナップショットの完了確認と停止前の状態)）。上の未作成は引き継ぎ時点の記録。復元試験は未実施で、EC2停止/サイズ変更/起動は引き続き各操作の直前承認が必要。
+その後の完了確認：ユーザーが新snapshot `snap-<SNAPSHOT_ID>` の完了/100％と旧snapshot保持をコンソール確認した（[17節](#17-最新スナップショットの完了確認と停止前の状態)）。上の未作成は引き継ぎ時点の記録。復元試験は未実施で、EC2停止/サイズ変更/起動は引き続き各操作の直前承認が必要。
 
 最新の停止状況：一時停止だけはユーザー承認済み。20:37 JSTの対象確認後、StopInstances dry-runが権限不足で拒否され、**まだ停止していない**。[18節](#18-一時停止承認後の確認とコンソールへの引き継ぎ)。サイズ変更/起動の承認はない。
 
@@ -268,7 +272,7 @@ AWS/GitHub設定変更・push・本番切替・サイズ変更・停止再開は
 | 証明書期限 | 2026-11-21 06:26:22 UTC＝11月21日15:26:22 JST | 短期証明書。更新実行・dry-runは今回していない |
 | 証明書更新 | Certbot 5.8.0。webroot `/var/www/letsencrypt`、shortlived。03/15時UTC＋最大30分の乱数遅延、Persistent=true | enabled/待機中、直前service終了0。更新時hookは `systemctl reload nginx`。期限を実際に延長できることは今回未検証 |
 | 自動配信 | `siteflow-cd.timer` enabled/active。起動1分後、前回service終了から5分＋精度10秒 | PC再起動と無関係。サーバー再起動後にも動くため、timerを一時stopするだけでは長期休止対策にならない |
-| 実行元 | serviceはec2-user、`/home/ec2-user/siteflow-cd/check-update.sh`→`deploy.sh`。state/deployed-shaが現mainと一致 | 現在は同じSHAのため更新なし。スクリプトを手動実行して調査していない |
+| 実行元 | serviceはec2-user、`<USER_HOME>/siteflow-cd/check-update.sh`→`deploy.sh`。state/deployed-shaが現mainと一致 | 現在は同じSHAのため更新なし。スクリプトを手動実行して調査していない |
 | GitHub | publicリポジトリ、現mainは旧版。既存認証でenvironments GET 200/0件、actions/runs GET 200/最新push成功 | production未作成。本人承認の実動作、artifact取得、トークンの必要権限全体は未検証 |
 | ツール | Amazon Linux 2023、Docker server25.0.16/client25.0.14、Nginx1.30.5。jq/curl/flock/ss/unzip/Pythonあり | root経由の `docker compose` は未導入。導入前に承認が必要。全OS更新やDocker Engine置換は提案範囲に含めない |
 | 新配置先 | `/etc/siteflow`、`/var/lib/siteflow`、`/etc/nginx/siteflow`、`/usr/local/lib/siteflow` は未存在 | 候補の配置先に既存同名ファイルはなかった。作成は未実施 |
@@ -323,7 +327,7 @@ root実行案は新CDがDocker/Nginxを操作するための候補であり、EC
 
 ### 確認済みの前提
 
-2026年11月16日、ユーザーがAWSコンソールで `13.237.188.172` がElastic IPで、`i-04201e271c824ac02` に関連付けられていることを確認したと申告。これを現在の計画の前提とする。エージェントによるDescribeAddresses再取得ではなく、参照権限不足は変更していない。Elastic IPの解放・関連付け解除をせず維持する。停止/サイズ変更の承認はまだ得ていない。
+2026年11月16日、ユーザーがAWSコンソールで `13.237.188.172` がElastic IPで、`i-<INSTANCE_ID>` に関連付けられていることを確認したと申告。これを現在の計画の前提とする。エージェントによるDescribeAddresses再取得ではなく、参照権限不足は変更していない。Elastic IPの解放・関連付け解除をせず維持する。停止/サイズ変更の承認はまだ得ていない。
 
 12:41:35 JST（03:41:35 UTC）のSSH再参照結果：timerはenabled/active/waiting、serviceはinactive/dead/MainPID=0/Result=success。lslocksに対象のdeploy.lockは表示なし。公開コンテナは従来のsiteflow-3002/同じSHAで、HTTPS200・TLS検証成功。瞬間の状態なので実行直前に再確認する。
 
@@ -349,8 +353,8 @@ sha256sumで現物を読み取り照合。識別値は秘密値ではなく、�
 
 | ファイル | SHA256 |
 | --- | --- |
-| `/home/ec2-user/siteflow-cd/check-update.sh` | `4c6a2989d81a066959b44baf01150252de044decd1e1ca98d9a88366d4fd52fd` |
-| `/home/ec2-user/siteflow-cd/deploy.sh` | `41d49346f1cc3b722bc81756fe195982c7b992a46685006edb09dde1003d080b` |
+| `<USER_HOME>/siteflow-cd/check-update.sh` | `4c6a2989d81a066959b44baf01150252de044decd1e1ca98d9a88366d4fd52fd` |
+| `<USER_HOME>/siteflow-cd/deploy.sh` | `41d49346f1cc3b722bc81756fe195982c7b992a46685006edb09dde1003d080b` |
 | `/etc/systemd/system/siteflow-cd.timer` | `6a2f7df063cc9de7adf6a3516a3cdca6f485799f2e9c194a460fa7cdbbe0df25` |
 | `/etc/systemd/system/siteflow-cd.service` | `49da643774b99958b638db5197d0095abb08078ccc17cf6f8d65784b3c747791` |
 | `/etc/nginx/conf.d/siteflow.conf` | `2c874b818a1e865283f62cec2e61478d3c4d104beb523bb700e58815bd64d595` |
@@ -396,7 +400,7 @@ sha256sumで現物を読み取り照合。識別値は秘密値ではなく、�
 
 | 項目 | 内容 |
 | --- | --- |
-| 対象 | シドニー `i-04201e271c824ac02`、現在t3.micro/1GB → t3.small/2GB |
+| 対象 | シドニー `i-<INSTANCE_ID>`、現在t3.micro/1GB → t3.small/2GB |
 | 目的 | MySQL512MiB＋Next.js各384MiB＋OS等の余裕を検証できる容量にする。2GBで本番合格したという意味ではない |
 | 維持 | 同じEBS/既存ファイル、Elastic IP `13.237.188.172`、VinextイメージとNginx、旧CDのdisabled状態 |
 | 必要な操作 | ①EC2一時停止、②停止中のインスタンスタイプ変更、③同じEC2の起動。各操作を実行前に明示して承認を得る |
@@ -433,10 +437,10 @@ sha256sumで現物を読み取り照合。識別値は秘密値ではなく、�
 
 | 項目 | 確認内容 |
 | --- | --- |
-| ID | `snap-0666dfa96de083c80` |
+| ID | `snap-<SNAPSHOT_ID>` |
 | 作成日時 | 2026年10月11日13:48 JST |
 | 状態 | completed/100％ |
-| 元ボリューム | `vol-042befaf03ffe5cb7` |
+| 元ボリューム | `vol-<VOLUME_ID>` |
 | 作成時容量/暗号化 | 8GiB/なし |
 | 保存方針 | ユーザー指定により削除しない。置換・期限設定・自動整理の対象にしない |
 
@@ -456,7 +460,7 @@ AWSはルートEBSではEC2停止後の取得を推奨する。一方、今回�
 
 ### 作成手順（承認後、AWSコンソール）
 
-1. シドニー地域を選び、EC2→「ボリューム」で `vol-042befaf03ffe5cb7` を選択。20GiB/gp3、対象EC2のルートであることを再確認。取り違えた場合は作成しない。
+1. シドニー地域を選び、EC2→「ボリューム」で `vol-<VOLUME_ID>` を選択。20GiB/gp3、対象EC2のルートであることを再確認。取り違えた場合は作成しない。
 2. 読み取りの事前確認とsync完了後、「アクション」→「スナップショットの作成」。保存先は通常の同一リージョン、説明に作成目的と元volume、Nameタグは `siteflow-before-t3-small-<実際のJST日時>` とする。秘密情報をタグ/説明へ含めない。新規作成対象を既存snapshotの削除/置換にしない。
 3. 標準層、所有アカウント内の非公開で1件だけ作成。作成要求がタイムアウトして結果不明なら一覧とIDを確認し、重複作成を避ける。画面に追加料金のサービスや想定外の共有設定があれば確定せず止める。
 4. 新ID/作成日時/元volume/容量/暗号化状態を記録し、pending→completed/100％になるまで確認する。完了待ちの間もEC2停止やサイズ変更へ進まない。時間はデータ量等により数時間かかる場合がある。
@@ -500,7 +504,7 @@ EC2内の既存権限では作成/参照ができるとは確認できていな�
 
 ### 未作成である理由と現在の報告値
 
-`aws ec2 create-snapshot --region ap-southeast-2 --volume-id vol-042befaf03ffe5cb7 ... --dry-run` はUnauthorizedOperationで拒否された。dry-runなので実snapshotは作成されない。IAMや認証情報を追加/変更していない。ブラウザー接続ホストも利用不可で、ツールからコンソールを操作できなかった。前回のURL安全確認制約を回避する代替操作はしていない。
+`aws ec2 create-snapshot --region ap-southeast-2 --volume-id vol-<VOLUME_ID> ... --dry-run` はUnauthorizedOperationで拒否された。dry-runなので実snapshotは作成されない。IAMや認証情報を追加/変更していない。ブラウザー接続ホストも利用不可で、ツールからコンソールを操作できなかった。前回のURL安全確認制約を回避する代替操作はしていない。
 
 | 報告項目 | 現在の状態 |
 | --- | --- |
@@ -518,12 +522,12 @@ EC2内の既存権限では作成/参照ができるとは確認できていな�
 
 | 項目 | 記録 |
 | --- | --- |
-| 新snapshot ID | `snap-0e59ef6e9a1635889` |
-| 元EBS | `vol-042befaf03ffe5cb7`（現在20GiBの対象ルートEBS） |
+| 新snapshot ID | `snap-<SNAPSHOT_ID>` |
+| 元EBS | `vol-<VOLUME_ID>`（現在20GiBの対象ルートEBS） |
 | 作成日 | 2026年11月16日。時刻/タイムゾーンの表示値は未提供なので推測しない |
 | 状態 | 完了済み/100％（ユーザー確認） |
 | 復元検証 | 未実施。一時volume/別EC2は作っていない |
-| 旧snapshot | `snap-0666dfa96de083c80` はユーザー確認で保持。削除しない |
+| 旧snapshot | `snap-<SNAPSHOT_ID>` はユーザー確認で保持。削除しない |
 | その他 | Snapshot側のVolumeSize/共有設定/保存層/暗号化の値は今回の報告に含まれず独立確認なし。承認案は標準/非公開/元EBSに合わせ非暗号化 |
 
 20:32:37 JST（11:32:37 UTC）のSSH参照：対象インスタンスID/typeは同じt3.micro、public-ipv4は13.237.188.172、実ルートvolume識別は同じ、容量20GiB/空き7.2GB。旧siteflow-3002は同じimageでrunning/unless-stopped、Nginx設定SHA256不変、nginx/dockerはactive/enabled。旧CDはtimer inactive/disabled、service inactive、配信ロックなし。HTTPS200/TLS検証結果0。
@@ -540,9 +544,9 @@ Elastic IPの関連付けは前段のユーザー確認を引き継ぎ、今回�
 
 20:37:18 JST（11:37:18 UTC）のSSH確認：instance-idとpublic-ipが対象どおり、ルートvolume識別一致、旧CD inactive/disabled/service停止中、既存SHAのsiteflow-3002、Nginx設定SHA256不変、HTTPS200/TLS検証成功。snapshot完了は17節のユーザー確認を引き継ぐ。Elastic IP属性自体をAPIで独立に再照会できてはいない。
 
-`aws ec2 stop-instances --region ap-southeast-2 --instance-ids i-04201e271c824ac02 --dry-run --output json` は権限拒否。`--dry-run`付きで検査しただけなので停止リクエストは出していない。既存IAMに権限を追加せず、sudo shutdown等による別経路の停止もしていない。最後の実測状態は稼働中であり「停止済み」と記録しない。
+`aws ec2 stop-instances --region ap-southeast-2 --instance-ids i-<INSTANCE_ID> --dry-run --output json` は権限拒否。`--dry-run`付きで検査しただけなので停止リクエストは出していない。既存IAMに権限を追加せず、sudo shutdown等による別経路の停止もしていない。最後の実測状態は稼働中であり「停止済み」と記録しない。
 
-ブラウザー接続は前段から利用できないため、ユーザーのAWSコンソール操作へ引き継ぐ。再承認は不要。手順はシドニー→EC2→インスタンス→対象 `i-04201e271c824ac02` を選択→公開IP/Elastic IPの関連付けとsnapshot対象を最終照合→「インスタンスの状態」→「インスタンスを停止」。終了/削除・強制停止・タイプ変更は選ばない。状態がstoppingからstoppedになったことを確認して報告してもらう。通常停止が拒否/失敗なら回避せず報告する。
+ブラウザー接続は前段から利用できないため、ユーザーのAWSコンソール操作へ引き継ぐ。再承認は不要。手順はシドニー→EC2→インスタンス→対象 `i-<INSTANCE_ID>` を選択→公開IP/Elastic IPの関連付けとsnapshot対象を最終照合→「インスタンスの状態」→「インスタンスを停止」。終了/削除・強制停止・タイプ変更は選ばない。状態がstoppingからstoppedになったことを確認して報告してもらう。通常停止が拒否/失敗なら回避せず報告する。
 
 stoppedになったらHTTPSが応答しなくなるのは予定された公開停止。SSH接続失敗だけでstoppedと断定せず、コンソールの状態を根拠にする。EBSとElastic IPの関連付けを維持し、サイズ変更/起動はまだ行わない。
 
@@ -550,9 +554,9 @@ stoppedになったらHTTPSが応答しなくなるのは予定された公開�
 
 2026年11月16日20:52 JST頃に、ユーザーからコンソールで「停止済み（stopped）」になったとの報告を受領。実際の停止時刻は未提供で、受領時刻を停止時刻として扱わない。エージェントから停止や状態API照会に成功したものではない。停止中のSSH/HTTPS不通を障害と判定せず、接続試行の反復を行わない。
 
-次は同じ `i-04201e271c824ac02` をt3.micro→t3.small（2GB）にする**タイプ変更だけ**を承認してもらう。承認後に、停止中/対象一致を確認してEC2コンソールの「アクション」→「インスタンスの設定」→「インスタンスタイプを変更」でt3.smallを保存する。想定外の追加設定/互換性エラーがあれば止めて報告する。
+次は同じ `i-<INSTANCE_ID>` をt3.micro→t3.small（2GB）にする**タイプ変更だけ**を承認してもらう。承認後に、停止中/対象一致を確認してEC2コンソールの「アクション」→「インスタンスの設定」→「インスタンスタイプを変更」でt3.smallを保存する。想定外の追加設定/互換性エラーがあれば止めて報告する。
 
-変更後もstoppedのまま維持し、起動は別承認。既存EBS/新旧snapshot/Elastic IPは変更・削除しない。EC2の単価増は起動後に発生し、差額は既存公開単価で毎時0.0132ドル、730時間で約9.64ドル。最新バックアップはsnap-0e59ef6e9a1635889でユーザー確認の完了済み、実復元試験は未実施。ローカルAWS認証やIAM権限を整える案は説明だけで導入していない。
+変更後もstoppedのまま維持し、起動は別承認。既存EBS/新旧snapshot/Elastic IPは変更・削除しない。EC2の単価増は起動後に発生し、差額は既存公開単価で毎時0.0132ドル、730時間で約9.64ドル。最新バックアップはsnap-<SNAPSHOT_ID>でユーザー確認の完了済み、実復元試験は未実施。ローカルAWS認証やIAM権限を整える案は説明だけで導入していない。
 
 ## 20. t3.smallへの変更・起動後の実測と旧版復旧
 
@@ -560,9 +564,9 @@ stoppedになったらHTTPSが応答しなくなるのは予定された公開�
 
 | 確認 | 2026-11-16 21:05:24 JST（12:05:24 UTC）の実測 |
 | --- | --- |
-| 対象/タイプ | `i-04201e271c824ac02` / `t3.small`。IMDSv2とSSHで確認 |
+| 対象/タイプ | `i-<INSTANCE_ID>` / `t3.small`。IMDSv2とSSHで確認 |
 | RAM | 総量1909MiB、利用可能1484MiB、swap2047MiB/使用0。変更前RAM総量913MiB |
-| root EBS | 同じ `vol-042befaf03ffe5cb7`、XFS、20GiB/空き7.2GB/使用65％。容量は増えていない |
+| root EBS | 同じ `vol-<VOLUME_ID>`、XFS、20GiB/空き7.2GB/使用65％。容量は増えていない |
 | 公開IP | 同じ13.237.188.172。Elastic IPであることは前段のユーザー確認を根拠とし、今回metadataは同じEC2の公開IPを確認 |
 | 旧アプリ | siteflow-3002が稼働、同じSHAとimage ID、127.0.0.1:3002→3000、restart unless-stopped、mountなし |
 | アプリ使用量 | 約54.63MiB/既存上限192MiB。一時点でありピーク/負荷測定ではない |
@@ -578,7 +582,7 @@ stoppedになったらHTTPSが応答しなくなるのは予定された公開�
 
 **この段階の合格：2GB化・同じEBS/IPの維持・既存Vinext/HTTPSの復旧・再起動後の旧CD休止維持。** MySQL/新旧Next.jsを含む実機負荷、DB保存/復元、本番migration、本人承認付き新CD、Next.js切替、2027年の長期休止/再公開まで合格したことにはならない。今回の再起動は旧版での再起動確認であり、Next.js/MySQL版の停止再開試験とは区別する。
 
-新snapshot snap-0e59ef6e9a1635889/旧snapshotは前段のユーザー確認で保持、実復元試験は未実施。今回の検証ではAWSリソース設定変更、コンテナ操作、EBS交換/削除、IP操作、GitHub設定/push、デプロイをしていない。
+新snapshot snap-<SNAPSHOT_ID>/旧snapshotは前段のユーザー確認で保持、実復元試験は未実施。今回の検証ではAWSリソース設定変更、コンテナ操作、EBS交換/削除、IP操作、GitHub設定/push、デプロイをしていない。
 
 次は未導入のComposeについて導入する版/配置先/影響を確定し、ホスト変更の承認後に導入・設定確認する。その後、公開用DB/秘密設定/バックアップ運用/新CDを別の承認範囲で準備する。旧CDはdisabledのまま維持し、mainへ無断pushしない。
 
@@ -715,7 +719,7 @@ private receiptは旧復旧dir内の`image-cleanup-20261116T205236Z-e9488733/`�
 
 ## 29. B作成前のAZ・構成確認とconsole設定値
 
-2026-11-17 06:01:04 JST、IMDSv2で同EC2 i-04201e271c824ac02/region ap-southeast-2/AZ ap-southeast-2c、root mapping xvdaを取得。lsblkはvol042befaf03ffe5cb7の20GiB nvme0n1のみ、root XFS。/srv/siteflow-mysqlはpath/mount/fstabすべて未存在。旧Vinext/HTTPS200/CD休止を維持。rootのgp3/非暗号化/終了時削除は以前のユーザーconsole確認で今回AWS API独立確認をしたものではない。
+2026-11-17 06:01:04 JST、IMDSv2で同EC2 i-<INSTANCE_ID>/region ap-southeast-2/AZ ap-southeast-2c、root mapping xvdaを取得。lsblkは<DATA_EBS_SERIAL>の20GiB nvme0n1のみ、root XFS。/srv/siteflow-mysqlはpath/mount/fstabすべて未存在。旧Vinext/HTTPS200/CD休止を維持。rootのgp3/非暗号化/終了時削除は以前のユーザーconsole確認で今回AWS API独立確認をしたものではない。
 
 作成案：シドニー/ap-southeast-2c/gp3 10GiB/3000IOPS/125MiB毎秒/空snapshot/暗号化あり/alias/aws/ebs、Name=siteflow-mysql-data。前回単価で月0.96ドル目安、未attachやEC2停止中も保存費は発生。UI値が違えば作成せず確認。[画面別の入力手順と確認項目](PREDEPLOY_VALIDATION.md#13-b準備ebs作成値と画面別手順2026-11-17)。今は最終作成ボタンを押さず、承認後に1件だけ作成→available/新VolumeId/暗号化等を確認→attachせず停止する。
 
@@ -725,19 +729,19 @@ attach時は未使用確認後の/dev/sdfを候補とし、OSは実NVMe serial�
 
 ## 30. 新EBSのユーザー作成・接続とNVMe照合
 
-ユーザーが暗号化EBS vol-01a737715ed956301を同EC2へ/dev/sdfで手動接続したと報告。2026-11-17 06:26:58 JST、読み取りだけで新disk /dev/nvme1n1/10GiB、lsblk/sysfs serial同VolumeId、ebsnvme-idで同VolumeIdと/dev/sdfを照合した。既存rootはvol-042befaf03ffe5cb7の20GiB nvme0n1/p1を/へmount。新diskはFS署名/UUID/partition/mountなし。root/旧ae3公開/Nginxhash/HTTPS200を維持した。
+ユーザーが暗号化EBS vol-<VOLUME_ID>を同EC2へ/dev/sdfで手動接続したと報告。2026-11-17 06:26:58 JST、読み取りだけで新disk /dev/nvme1n1/10GiB、lsblk/sysfs serial同VolumeId、ebsnvme-idで同VolumeIdと/dev/sdfを照合した。既存rootはvol-<VOLUME_ID>の20GiB nvme0n1/p1を/へmount。新diskはFS署名/UUID/partition/mountなし。root/旧ae3公開/Nginxhash/HTTPS200を維持した。
 
 [証拠・コマンド・format/mountの未実行手順](PREDEPLOY_VALIDATION.md#14-ユーザー作成接続後のnvme読み取り照合2026-11-17)。暗号化/gp3/KMS等のAWS実属性をOS probeで独立確認したわけではない。作成/attachの実時刻は未提供、Codex実行と誤記しない。次は新VolumeId/未使用条件を再照合してB3 XFS formatだけを承認する。B4 mount、B5 fstab/起動保護、本番DB/Next/公開はまだ。
 
 ## 31. 承認B3：追加10GiBのXFS format結果
 
-2026-11-17 06:34:15 JST、B3だけの承認後、新vol-01a737715ed956301のnvme1n1/10GiB/serial/AWS名/未mount/署名なし等を再照合しmkfs.xfs -L SITEFLOW_DBを強制なしで1回実行。XFS/UUID **276f374a-7e33-4ff0-b6f4-b0f185280cd6**/label SITEFLOW_DB/未mountを確認した。既存root20GiBのFS/UUID/mount、fstab/Nginxhash、3containerは前後一致、HTTPS200。
+2026-11-17 06:34:15 JST、B3だけの承認後、新vol-<VOLUME_ID>のnvme1n1/10GiB/serial/AWS名/未mount/署名なし等を再照合しmkfs.xfs -L SITEFLOW_DBを強制なしで1回実行。XFS/UUID **<DATA_EBS_UUID>**/label SITEFLOW_DB/未mountを確認した。既存root20GiBのFS/UUID/mount、fstab/Nginxhash、3containerは前後一致、HTTPS200。
 
 [詳しい事実・影響・次の範囲](PREDEPLOY_VALIDATION.md#15-b3承認後の新10gib-xfsフォーマット結果)。formatだけでmount/dir作成/fstab/DB/Next/pushは実行していない。次はB4のUUID指定mountを個別承認する。自動mount/専用起動管理はその後の別承認・未実装部分を含む。
 
 ## 32. 承認B4：追加EBSの手動mount結果
 
-2026-11-17 06:40:24 JST、B4だけ承認後、新vol-01a737715ed956301/10GiB/XFS/UUID276f374a-7e33-4ff0-b6f4-b0f185280cd6と未mountを再照合。mount先は未存在で既存dataなし、安全な親dirを確認して空dirを作成し、UUIDで/srv/siteflow-mysqlへ1回mount。findmnt/lsblk/dfでsource nvme1n1/UUID/XFS/rwが一致、空き約9.84GiB/使用2％。
+2026-11-17 06:40:24 JST、B4だけ承認後、新vol-<VOLUME_ID>/10GiB/XFS/UUID<DATA_EBS_UUID>と未mountを再照合。mount先は未存在で既存dataなし、安全な親dirを確認して空dirを作成し、UUIDで/srv/siteflow-mysqlへ1回mount。findmnt/lsblk/dfでsource nvme1n1/UUID/XFS/rwが一致、空き約9.84GiB/使用2％。
 
 rootのFS/UUID/mount、fstab/Nginxhash、3containerのID/image/状態/StartedAt/port/restartは不変、HTTPS200。[詳細と未実施](PREDEPLOY_VALIDATION.md#16-b4承認後の手動マウント結果)。手動mountのみで自動mountは未設定。fstab/Docker/DB subdir/Volume/DB起動/Next/pushは含めない。次は自動mount設定とDB起動保護を別承認で整える。
 
@@ -786,7 +790,7 @@ EC2のprivate TLS proxyはloopback3443だけ、Next候補3001へ転送する。P
 例示するSSH全体（**現時点では試験後に終了済み。再確認時だけ実行**）：
 
 ~~~powershell
-ssh -i C:\Users\syucream\Downloads\siteflow-key.pem -o BatchMode=yes -o StrictHostKeyChecking=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=2 -N -L 127.0.0.1:34439:127.0.0.1:3443 ec2-user@13.237.188.172
+ssh -i <LOCAL_PATH> -o BatchMode=yes -o StrictHostKeyChecking=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=2 -N -L 127.0.0.1:34439:127.0.0.1:3443 ec2-user@13.237.188.172
 ~~~
 
 - -iは本人の既存鍵、BatchModeは対話的な別認証へ移行しない、StrictHostKeyCheckingは登録済みホスト鍵を厳守、ExitOnForwardFailureは転送できなければ終了、ServerAliveは30秒×2回の応答監視。-Nはコマンドを実行せず転送だけ、-Lは両側をloopbackへ限定する。AWS公開設定/hosts/証明書の信頼設定は変更しない。
@@ -822,7 +826,7 @@ EC2全体/全Dockerの停止再起動、EBS交換/削除、legacy削除はこの
 ユーザーがCloudShellでS3/IAM作成と設定読み戻し成功を報告。CodexはEC2ロールの実効List/Put/Getを確認した。EC2ロールに管理設定の読取権限やGetObjectVersionは追加していない。S3/IAM全設定の確認はユーザー実行のCloudShell結果に基づく。
 
 - 保存確認：2026-11-18 19:55 JST（10:55 UTC）。正式DB siteflow_public_app、InnoDBの全16テーブル。ユーザー1、案件2、session0。
-- バケット：siteflow-db-backups-173291123374-ap-southeast-2（ap-southeast-2）。オブジェクト：protected/20261118T105451Z-ca777913/siteflow_public_app.sql.gz.age
+- バケット：siteflow-db-backups-<AWS_ACCOUNT_ID>-ap-southeast-2（ap-southeast-2）。オブジェクト：protected/20261118T105451Z-ca777913/siteflow_public_app.sql.gz.age
 - VersionId：jdfp5GyziCeQ8GI3j9Ork9GO4ECB4Y0v。暗号文 4289 bytes。SHA-256：ba364bb8846b384c0d9c37be5730ce99ba887a25247283263e8fdd1a1f3da984
 - 目録：protected/20261118T105451Z-ca777913/manifest.json。VersionId：cmEVaTlCUoh18SYhelDfHaPyeX.XWEEv。SHA-256：ffe3ad05cf6bdeec8d9722f0033b166e21f7b8d83c4635ef1caddffd603dd915
 - SSE-S3 AES256。single PUTのIf-None-Match:*で同名上書きを防止。S3から取得したVersionId・サイズ・暗号化方式・SHA256 checksumが一致。目録も再取得して版とハッシュ一致。
@@ -839,13 +843,13 @@ EC2全体/全Dockerの停止再起動、EBS交換/削除、legacy削除はこの
 CloudShellで以下を実行する（S3読み取りのみ）。--bucketは対象bucket、--keyは保存パス、--version-idは今回の固定版、--expected-bucket-ownerは所有者の取り違え防止、--regionはSydney、--checksum-mode ENABLEDはS3 checksumの取得、最後の引数は暗号文のローカル保存名。
 
 ~~~bash
-aws s3api get-object --bucket siteflow-db-backups-173291123374-ap-southeast-2 --key protected/20261118T105451Z-ca777913/siteflow_public_app.sql.gz.age --version-id jdfp5GyziCeQ8GI3j9Ork9GO4ECB4Y0v --expected-bucket-owner 173291123374 --region ap-southeast-2 --checksum-mode ENABLED siteflow-db-20261118T105451Z-ca777913.sql.gz.age
+aws s3api get-object --bucket siteflow-db-backups-<AWS_ACCOUNT_ID>-ap-southeast-2 --key protected/20261118T105451Z-ca777913/siteflow_public_app.sql.gz.age --version-id jdfp5GyziCeQ8GI3j9Ork9GO4ECB4Y0v --expected-bucket-owner <AWS_ACCOUNT_ID> --region ap-southeast-2 --checksum-mode ENABLED siteflow-db-20261118T105451Z-ca777913.sql.gz.age
 ~~~
 
 CloudShellのアクション→ファイルのダウンロードで末尾のファイル名を指定し、WindowsのDownloadsへ保存する。既存同名があれば上書きせず別名とし、補助スクリプトへ引用符付きの第1引数で実パスを渡す。ファイルは暗号文なのでCloudShell/PCにも秘密鍵は送らない。
 
 ~~~powershell
-node "C:\Users\syucream\Projects\siteflow\work\decrypt-siteflow-s3-backup.mjs"
+node "<LOCAL_PATH>"
 ~~~
 
 nodeはローカル補助スクリプトの実行。既定でDownloadsの上記暗号文を読み、サイズ/ハッシュと暗号化済みidentityの指紋を照合。YESは固定版取得済みの本人確認であり、パスフレーズではない。パスフレーズはageの非表示プロンプトにだけ入力する。平文backupをPCへ保存せず、復号したgzipをSSHの匿名パイプ経由で暗号化EBSのrestore-input.sql.gzへ送信し、gzip破損検査後に確定する。age失敗時は確定しない。秘密鍵はEC2へ送らない。
@@ -989,7 +993,7 @@ examples/mysql/public-api-settings.tsのreadPublicApiSettingsはDB名に ^sitefl
 
 ### バックアップとDB整合性
 
-- 保存先：siteflow-db-backups-173291123374-ap-southeast-2 / protected/20261118T105451Z-ca777913/siteflow_public_app.sql.gz.age。SSE-S3 AES256、age事前暗号化。
+- 保存先：siteflow-db-backups-<AWS_ACCOUNT_ID>-ap-southeast-2 / protected/20261118T105451Z-ca777913/siteflow_public_app.sql.gz.age。SSE-S3 AES256、age事前暗号化。
 - VersionId：jdfp5GyziCeQ8GI3j9Ork9GO4ECB4Y0v。暗号文4,289 bytes、SHA256 ba364bb8846b384c0d9c37be5730ce99ba887a25247283263e8fdd1a1f3da984。S3再取得時の版/ハッシュ/サイズ一致は前段階で確認済み。
 - 本人がVersionId指定で取得し、PCの暗号化済みage identityとBitwarden保管のパスフレーズで復号。秘密鍵/パスフレーズはEC2へ送信せず、PCへ平文backupを保存せずSSHで暗号化EBSへ転送。gzip検査成功。
 - 新DBが未存在→新規作成→テーブル0件を確認して、同じbackupを1回だけVERIFY_IDENTITY付きTLSで取込済み。今回は作成済みDBを再利用しただけ。以前の復元DBも削除/上書きしない。
@@ -1044,7 +1048,7 @@ examples/mysql/public-api-settings.tsのreadPublicApiSettingsはDB名に ^sitefl
 - certbot-renew.timer：enabled/active/waiting。OnCalendar=*-*-* 03,15:00:00、RandomizedDelaySec=30m、Persistent=true。EC2のタイムゾーンUTCで毎日03/15時が基準（JST12/00時）、最大30分のタイマー遅延あり。Persistentは停止中のタイミングを再開時に補う設定で、EC2停止中に更新できる意味ではない。
 - 最終timer起動：2026-11-19 00:00:31 JST。service終了00:00:33 JST、Result=success/ExecMainStatus=0。oneshot serviceがinactive/deadなのは実行完了後の正常な待機状態。ExecMainCode=1は終了形式であり、終了ステータス1と混同しない。
 - 観測時点の次回timer予定：2026-11-19 12:03:33 JST。更新処理の完了時刻はタイマー起動予定と同じとは限らない。
-- 通常実行：/home/ec2-user/certbot-venv/bin/certbot renew --quiet。更新時期でなければ見送る。
+- 通常実行：<USER_HOME>/certbot-venv/bin/certbot renew --quiet。更新時期でなければ見送る。
 - 実更新成功：2026-11-18 12:17:17 JST。Certbotログにrenewal successと既存deploy hookの実行があり、Nginx journalにも同時刻のreload開始/完了がある。既存hookはsystemctl reload nginxのみ。pre/post hookなし。
 - 直近の2026-11-19 00:00:33 JSTはnot due / no renewals attempted / no renewal failures。失敗ではない。初回の広い分類がNo renewal failuresもrenewalFailedに数えたため、読み取り抽出だけ修正し正確な文で確認した。ログ全文、ACME token、鍵は表示していない。
 - タイマー有効という設定だけでなく、期限が延長された実配信証明書と自動更新・reloadの実績を確認した。ただし将来の失敗が起きない保証ではない。
@@ -1067,7 +1071,7 @@ EC2を休止すれば更新処理は動かない。2027年の再公開時はEIP�
 4. 下記は将来の承認後の実行案で、今回は未実行。過去の手動予行で用いた一時unitと同じ制限を想定する。実行中のtimer処理と衝突する場合は停止/強制解除せず待って照合する。
 
 ~~~bash
-sudo systemd-run --quiet --wait --pipe --collect --property=MemoryMax=256M --property=MemorySwapMax=0 --property=LimitCORE=0 --property=RuntimeMaxSec=180 /home/ec2-user/certbot-venv/bin/certbot renew --cert-name 13.237.188.172 --non-interactive --no-random-sleep-on-renew
+sudo systemd-run --quiet --wait --pipe --collect --property=MemoryMax=256M --property=MemorySwapMax=0 --property=LimitCORE=0 --property=RuntimeMaxSec=180 <USER_HOME>/certbot-venv/bin/certbot renew --cert-name 13.237.188.172 --non-interactive --no-random-sleep-on-renew
 ~~~
 
 sudoは対象の管理操作、systemd-runは一時unit、--quietは管理メッセージ抑制、--waitは終了待ち、--pipeは出力受取、--collectは完了した一時unitの管理情報回収。MemoryMaxは256MiB上限、MemorySwapMax=0はswap禁止、LimitCORE=0はcore抑止、RuntimeMaxSecは180秒上限。renewは既存更新設定を使い、--cert-nameはこのIPのlineageだけを対象、--non-interactiveは質問待ちをしない、--no-random-sleep-on-renewは手動実行時だけCertbot側のランダム待ちを省く。ログは内容を分類して記録し、秘密を含みうる生の例外/ACMEログを表示しない。期限判定で見送られる可能性と失敗の可能性があり、タイマー設定を変更するコマンドではない。
@@ -1104,4 +1108,32 @@ systemctl showは状態の読み取り、--propertyは出す項目の限定。jo
 
 ## 承認付きCD導入前の準備（2026-11-19）
 
+### 2026-11-21 再レビュー指摘の修正
+
+最新はAWS_CD_STAGE1.md（ローカル資料 `docs/AWS_CD_STAGE1.md`・GitHub未反映）。FINALを確定点にし、ABORTとの排他裁定・共通lock/active・incident先行保存・完了候補必須へ修正した。停止状態の基盤準備はGOだが、配信ロールは明示Deny、台帳はSTOP#0で構築する計画。構築・EC2配置・Actions・公開はまだ実行しない。
+GitHub変数falseは新規開始の抑止、途中停止はAWS側STOP。FINAL成立後のSTOPは次の配信を止める。確定済み公開の復旧とincident/lock解除は、確認後の別承認。EC2本体を停止する計画ではない。
+
+### 2026-11-20追記：PAT不要の新CD
+
+最新は第1段階のローカル実装・検証記録（ローカル資料 `docs/AWS_CD_STAGE1.md`・GitHub未反映）。Actionsの本人承認と署名、OIDC/STS、固定SSM、DynamoDBの短期許可を利用する。既存のCD・公開環境には反映していない。候補確認の許可で公開切替はしない。進行中停止はAWS側STOP、正式DB migrationは別承認。旧方式の記録は以下に保持する。
+
 最新のローカル変更・production画面設定・Linuxテスト・候補更新/rollback・復帰試験計画は[APPROVED_CD_SETUP.md](APPROVED_CD_SETUP.md)を参照。新CDはEC2未導入。候補更新だけの承認でrelease.shを実行しない（Nginxの公開切替を含む）。正式DB更新、公開切替、再起動、push/Actionsは各承認が必要。
+## 2026-11-21：新CDを保留し、既存候補の手動公開準備を完了
+
+初回版は11月17日の稼働中候補をイメージIDで固定する。最新mainとの同一性を主張しない。新CD/OIDC/DynamoDB/高度な機能は保留し、既存コードと186件の過去テストを保持する。
+
+EBS保護付きの同一コンテナ起動設定・5分ごとの最大約4MiB状態記録・正式DBのage暗号化S3保存と再取得照合・Nginx設定退避を実施。既存3コンテナのID/開始時刻とNginx設定は不変、旧HTTPS200。新バックアップの再復元、実再起動、公開切り替えはしていない。
+
+最新の設定値・操作の意味・未検証・切り戻し・次の承認範囲は [手動初回公開の記録](MANUAL_PUBLIC_RELEASE.md) を優先する。過去の新CD必須という公開条件は今回には適用しない。
+
+## 2026-11-21：手動公開を試行し、readiness 404で旧経路へ復帰
+
+本人の公開切り替え承認後、直前確認→Nginxを3001へ変更→構文検査→reloadまで実施。直後の公開`/api/ready`が404となったため、承認範囲の退避設定復元→構文検査→reloadで3002へ戻しHTTPS200を確認した。候補直接ready200/MySQL healthy、既存3コンテナのID/開始時刻と退避済みNginx内容の一致を確認。Cookie・ログイン・案件操作へは進んでおらず、正式DBへの業務書き込みはない。
+
+Next.jsの公開は未完了。404の原因は未確定で、追加修正・再切り替えはせず停止した。最新の事実・記録先・残課題は [手動公開記録](MANUAL_PUBLIC_RELEASE.md) を参照する。
+
+## 2026-11-21：readiness待機を修正して1回再試行、検証アカウント読取で中断
+
+新worker確認、新規TLS接続、最大30秒・readiness200/ok:trueの3回連続確認と、旧版の静的ファイル参照照合を検証処理へ追加。モック10件成功後、本人承認の再試行を1回実施。公開readinessとNext.js画面の参照一致は成功したが、一時検証枠はアカウント読取準備で中断し、旧版照合を伴ってVinextへ復帰した。
+
+アカウントはUID1000/mode600、検証枠はUID0/cap-drop ALLでアクセスできない構成。秘密ファイルを緩和せず、追加再試行は行っていない。Cookie・ログイン・案件操作は未実施、正式DBの業務書き込みなし。最新結果と未実施の最小修正案は [手動公開記録](MANUAL_PUBLIC_RELEASE.md) を参照。以前の404の直接原因は確定扱いにしない。

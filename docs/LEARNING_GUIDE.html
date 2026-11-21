@@ -33,7 +33,7 @@
   <h1>一度に、ひとつ分かればいい。</h1>
   <p class="intro">1回5分、図やコードを1ブロックずつ。図を見る → 実コードを読む → 小さく書く。<br>開発が進んだら、このノートに追記していきます。</p>
   <div class="course-shortcuts" aria-label="実コードを読む4テーマ"><p>初心者向けの実コード教材：この順で、ひとつずつ。</p><button type="button" data-topic="react">① React</button><button type="button" data-topic="typescript">② TypeScript</button><button type="button" data-topic="next">③ Next.js</button><button type="button" data-topic="api">④ API</button></div>
-  <p class="small muted" style="margin-top:12px">以前のテーマには開発当時の未実装・未接続の記録も含みます。アプリの最新状態は「まず、全体像」と最新の開発履歴を確認してください。</p>
+  <p class="small muted" style="margin-top:12px">現在地：新CDの停止・確定・復旧をローカルで修正。AWS基盤構築は未実施。以前のテーマには開発当時の未実装・未接続の記録も含みます。アプリの最新状態は「まず、全体像」と最新の開発履歴を確認してください。</p>
   <div class="status" aria-label="アプリの現在地">
     <div><strong><span class="badge">画面</span> 2種類の画面</strong><span class="small muted">/ はメモリ・/workspace はDB接続</span></div>
     <div><strong><span class="badge">DB</span> 専用DBで検証済み</strong><span class="small muted">履歴保持・誤参照など13件成功</span></div>
@@ -47,7 +47,7 @@
     <select id="topic-select" class="mobile-select" aria-label="学習テーマを選ぶ"></select>
     <div class="self"><span>自分で説明できたテーマ</span><strong id="progress-text">0 / 10</strong><p class="muted small">自己チェック。<br>開発の完成率とは別です。</p><p class="storage" id="storage-note">チェックだけを、このブラウザー内に保存します。</p></div>
   </aside>
-  <main class="main">
+  <main class="main"><aside role="note" style="padding:12px 16px;border:1px solid var(--line);border-radius:10px;margin-bottom:20px">公開資料ではAWS識別子・個人PCパスを匿名化しています。自動デプロイは未導入です。新CD/OIDCのテーマはローカルの学習履歴で、一部の参照ソースはGitHub未反映です。</aside>
     <article id="lesson" class="lesson" aria-labelledby="lesson-title"></article>
     <div class="pager"><button id="previous-button" type="button">← 前のテーマ</button><button id="next-button" type="button" class="primary">次のテーマ →</button></div>
     <section class="history" aria-labelledby="history-title"><div class="section-head"><h3 id="history-title">何を作ってきた？</h3><span class="small muted">気になる履歴だけ開く</span></div><div id="recent-history"></div><details class="archive"><summary id="archive-label">過去の開発も見る</summary><div id="archive-history"></div></details></section>
@@ -60,34 +60,34 @@
 <!-- 更新する場所：headerの現在地と、このJSONのupdated・topics・journal。履歴とテーマIDを保ち、秘密情報は書かない。 -->
 <script id="learning-data" type="application/json">
 {
-  "updated": "2026-11-19",
+  "updated": "2026-11-21",
   "topics": [
     {
-      "id": "overview",
-      "title": "まず、全体像",
-      "status": "現在地",
-      "diagram": "next-api-integration",
-      "one": "会議と案件をDBへ保存でき、AWS候補とS3復元も確認済み。現在は公開前の承認付きCDを準備中。",
-      "points": [
-        "開始時に全対象を固定。21件でも一覧の先頭20件だけにしない。",
-        "確認した瞬間の進捗・状態・確認者を保存。取消前の記録も消さない。",
-        "同じ会議を再開できる。未確認を残す終了は一覧を見て明示確認する。"
-      ],
-      "why": "できた部分と、これからつなぐ部分を分けて説明するため。",
-      "proof": "業務46件・会議HTTP/DB11件・既存API102件・会議ブラウザー7項目・従来統合5項目が成功。会議込み16テーブルの復元、型検査・lint・ビルドも成功。",
-      "pending": "差分表示・相談事項・決定事項・作業項目・招待/実メール認証は未完成。AWS候補起動・S3復元は確認済みだが、承認付きCD導入・Linux配信統合・起動復帰・公開切替は未完了。",
-      "question": "/ の画面で指摘を登録したら、MySQLにも保存される？",
-      "answer": "/ の指摘管理はメモリデモなのでDBには保存しない。/workspace の新規案件登録は専用MySQLへ保存する。画面による違いを区別する。",
-      "pitch": "Next.jsにAPIを統合し、業務処理とDB処理は分離したまま再利用しました。別APIなしでログイン・保存・競合を確認し、保管権限は通常編集より狭くしています。",
-      "exercise": "/ と /workspace を開き、メモリデモとDB接続版の違いを1文ずつ話す。",
-      "code": null,
-      "files": [
-        "app/page.tsx",
-        "app/workspace/page.tsx",
-        "components/siteflow/connected-workspace.tsx",
-        "docs/LOCAL_WORKSPACE.md"
-      ]
-    },
+  "id": "overview",
+  "title": "まず、全体像",
+  "status": "現在地",
+  "diagram": "next-api-integration",
+  "one": "Next.js＋MySQL版を既存AWSで初回公開。公開HTTPSでログイン・案件保存・再取得・ログアウトを確認。新CD/OIDCは保留。",
+  "points": [
+    "公開の入口はNginx→Next.js3001。旧Vinext3002を復旧用に維持。",
+    "テスト案件だけ作成・進捗37%保存・再取得。既存案件は変えない。",
+    "秘密の権限600を維持して検証。未完成機能と未検証事項は残す。"
+  ],
+  "why": "できた部分と、これからつなぐ部分を分けて説明するため。",
+  "proof": "2026-11-21 11:58 JSTに公開HTTP試験成功。readiness3回、Cookie、ログイン/保存/再取得/ログアウト、旧セッション401、MySQL healthy、外部WindowsのHTTPSを確認。過去の会議・復元試験記録は各履歴に保持。",
+  "pending": "差分表示・相談事項・決定事項・作業項目・招待/実メール認証は未完成。今回の公開後実ブラウザーUI・EC2再起動・長期ログ運用は未検証。新CD/OIDCは今回の公開条件から外して保留。",
+  "question": "/ の画面で指摘を登録したら、MySQLにも保存される？",
+  "answer": "/ の指摘管理はメモリデモなのでDBには保存しない。/workspace の新規案件登録は専用MySQLへ保存する。画面による違いを区別する。",
+  "pitch": "Next.jsにAPIを統合し、業務処理とDB処理は分離したまま再利用しました。別APIなしでログイン・保存・競合を確認し、保管権限は通常編集より狭くしています。",
+  "exercise": "/ と /workspace を開き、メモリデモとDB接続版の違いを1文ずつ話す。",
+  "code": null,
+  "files": [
+    "app/page.tsx",
+    "app/workspace/page.tsx",
+    "components/siteflow/connected-workspace.tsx",
+    "docs/LOCAL_WORKSPACE.md"
+  ]
+},
     {
       "id": "react",
       "title": "React：画面が変わる理由",
@@ -3406,9 +3406,420 @@
         "deploy/cd-check.sh",
         "deploy/check-release-permission.sh"
       ]
+    },
+    {
+      "id": "dedicated-branch-pushed",
+      "title": "190ファイルを専用branchへ保存した・公開は変えない",
+      "status": "commit/push完了・PR未作成",
+      "diagram": "local-release-gate",
+      "one": "承認した190件だけを専用branchへcommit/push。Actionsは0件で、既存の公開は変わっていない。",
+      "points": [
+        "branchはfeat/nextjs-mysql-approved-cd、commitは788d760。stage後に190件と内容・秘密情報0件・除外対象なしを確認。文書末尾の空行1件だけ整形した。",
+        "mainは元のae3e31aのまま。branch pushだけではCIが始まらない設計で、GitHubで2回確認してActions0件・PR0件。",
+        "push前後のEC2を読取比較。3コンテナID/起動時刻/imageとNginx設定が同じ、旧CD停止、HTTPS200。学習ガイドのこの完了追記はローカルだけで追加送信していない。"
+      ],
+      "why": "GitHubへの保存・CIでの検査・本番公開を別々に確認し、勝手にPRや公開へ進まないため。",
+      "proof": "GitHub refが788d76004df6f4fe8807fe6f9e86e44c21e77dafと一致。commitの190ファイルとstage blob一致。main不変、Actions0/PR0。EC2前後の識別情報/config一致、旧Vinext/Next候補/MySQL/Nginx正常、HTTPS200。",
+      "pending": "PR作成とCI実行、mainマージ、EC2専用API実tokenの権限確認、CD導入/起動復帰/公開は未承認または未検証。この追記を含む追加commit/pushはしていない。",
+      "question": "pushできたのにActionsが0件なのは失敗？",
+      "answer": "失敗ではない。このbranchのpushはtrigger対象外。main向けPRを承認後に作るとCIが動く。まだPRは作っていないので、今回は0件が期待どおり。",
+      "pitch": "送信対象を190ファイルに限定してstage内容を照合し、専用branchだけへpushしました。GitHubのSHAとActions0件、本番の無変更を確認し、PRや公開は別承認に残しています。",
+      "exercise": "GitHubの専用branchとmainを開き、commit SHAが違うことを確認しよう。次にci.ymlのon.push.branchesを見て、Actionsが動かない理由を説明しよう。",
+      "code": null,
+      "files": [
+        ".github/workflows/ci.yml",
+        "docs/GITHUB_PUSH_AUDIT.md",
+        "docs/GITHUB_REVIEW.md",
+        "docs/DATABASE_BACKUP_CHECK.md"
+      ]
+    },
+    {
+      "id": "pr5-ci-success",
+      "title": "PRのCI成功と本番配信は別の段階",
+      "status": "PR CI成功・本番公開NO-GO",
+      "diagram": "local-release-gate",
+      "one": "GitHub上の自動検査は成功。本番へ配信する処理は実行していません。",
+      "points": [
+        "PR #5の変更190ファイルは承認済み一覧と一致。",
+        "実行対象のdocker-buildは成功。配信用ジョブは設計どおりスキップ。",
+        "production設定を再読み込みし、承認者・main制限・配信falseの維持を確認。"
+      ],
+      "why": "CIはビルドやテストを自動確認する仕組みです。CDはサーバーへ配信する仕組みです。検査の成功と公開の承認を分けることで、意図しない本番変更を防ぎます。",
+      "proof": "PR #5 / run 44528884795 は completed・success。docker-build成功。Linux配信103件、イメージ照合3件、業務42件、Compose設定5件、アプリ・migrationビルド、HTTP確認が成功。release-approvedとGHCR送信はPR条件によりスキップ。失敗・未完了なし。",
+      "pending": "実トークンによるGitHub API権限確認、実環境での配信・復旧確認は未実施。本番公開は引き続きNO-GO。今回、追加commit/push・マージ・EC2操作・設定変更なし。",
+      "question": "配信用ジョブがスキップでもCI成功といえるのはなぜ？",
+      "answer": "PRでは検査だけを行う設計だからです。実行対象の検査が成功し、配信は起動条件に合わず省略されています。未完了や失敗とは異なります。",
+      "pitch": "PRでDockerビルドとテストを成功させ、productionの配信スイッチはfalseのまま維持しました。公開には別途、実環境の確認と承認が必要です。",
+      "exercise": "ci.ymlを開き、pull_requestで起動する条件と、release-approvedの実行条件を探してみましょう。",
+      "code": null,
+      "files": [
+        ".github/workflows/ci.yml",
+        "work/pr5-ci-final-20261119.json"
+      ]
+    },
+    {
+      "id": "main-merged-awaiting-approval",
+      "title": "mainへ統合した・公開は承認待ちで止める",
+      "status": "ビルド・GHCR成功／production承認待ち",
+      "diagram": "local-release-gate",
+      "one": "mainにコードをまとめても、本番公開は別の承認まで進みません。",
+      "points": [
+        "マージSHAとCI・2イメージのrevisionが一致。",
+        "GHCR保存成功。release-approvedは本人承認待ち。",
+        "配信許可artifactは0件。EC2への接続・配信なし。"
+      ],
+      "why": "mergeはコードを統合する操作、GHCRはコンテナイメージの保管場所です。保管と公開を分け、検査済みの同じ版だけを後で指定できるようにします。",
+      "proof": "PR #5を通常mergeでmainへ統合。SHA e0cc78f258bbe4f6b2446eec1025e0e3820e6093とActions run 44531879015の対象SHAが一致。docker-build成功、Linux103件・image3件・業務42件・Compose5件・HTTP成功。GHCRアプリ/migrationのタグ・digest・revisionを直接読み取り照合。production承認待ち、artifact 0件。",
+      "pending": "productionは未承認、全体runはwaiting。EC2・MySQL・Nginxへの操作なし。実トークン権限、実配信・復旧検証は残課題。本番公開NO-GOを維持。",
+      "question": "CIのビルドが成功しているのに全体がwaitingなのはなぜ？",
+      "answer": "productionを使うrelease-approvedジョブが本人の承認を待っているためです。今回の正しい停止位置であり、ビルド失敗ではありません。",
+      "pitch": "main統合後にビルド・テスト・GHCR保存を確認し、イメージのrevisionとdigestを照合しました。配信はproduction承認待ちで止めています。",
+      "exercise": "ci.ymlのenvironment: productionと、falseでartifact作成を省略する条件を探しましょう。",
+      "code": null,
+      "files": [
+        ".github/workflows/ci.yml",
+        "deploy/image-record.mjs",
+        "deploy/release-record.mjs",
+        "work/main-merge-result-20261119.json"
+      ]
+    },
+    {
+      "id": "ec2-pat-readonly-preparation",
+      "title": "Windowsの成功とEC2への秘密の受け渡し",
+      "status": "Windows本人確認済み／EC2未接続",
+      "diagram": "local-release-gate",
+      "one": "トークンを渡す前に、通信経路だけでなく入力が記録される場所も確認します。",
+      "points": [
+        "WindowsでのGET成功は本人報告として記録。EC2成功とは分ける。",
+        "既存SSHの標準入力転送を第一候補にし、sudo等の入力記録を先に確認。",
+        "EC2用GETチェッカーだけをローカル準備。転送・配置・CD起動は別承認。"
+      ],
+      "why": "PATはGitHubの情報を読む鍵です。SSHは通信を暗号化しますが、接続先のsudoやセッション記録は別なので、ログへ残らない経路を確認してから使います。",
+      "proof": "本人報告：Windows専用PATのGET8件すべてHTTP200、release=false、保護設定・main/CI・承認待ち・artifact0件を確認。AIは秘密値を受領していない。今回のローカルEC2 GETチェッカーはGit Bashのbash -n構文確認成功。スクリプト本体とAPIは未実行。",
+      "pending": "EC2への接続・転送・配置は未実施。現在のSSH/SSM/sudo/監査ログ設定、実際のPAT期限日時、EC2でのGET・jq応答判定は未確認。受信/送信コードは未実装。CD停止、production未承認、本番公開NO-GOを維持。",
+      "question": "SSHで暗号化すれば、ログにも絶対に残らない？",
+      "answer": "通信中の暗号化と、EC2側の入力・出力記録は別です。トークンを引数やコマンド本文へ入れず、sudo等の記録設定を事前に確認します。",
+      "pitch": "Windowsで専用PATの読み取りを確認し、EC2には独立したGETチェッカーを準備しました。秘密の転送はログ設定と保存先を確認してから別承認で行い、CDは停止したままです。",
+      "exercise": "check-siteflow-pat-readonly.ps1のGetAsyncと、ec2-pat-get-only.shのGET固定・リダイレクト非追従・curl stdin設定を探しましょう。",
+      "code": null,
+      "files": [
+        "docs/EC2_PAT_READONLY_PLAN.md",
+        "work/ec2-pat-get-only.sh",
+        "work/check-siteflow-pat-readonly.ps1"
+      ]
+    },
+    {
+      "id": "aws-cd-stage1",
+      "title": "新CD：短い許可で安全に配信する",
+      "status": "ローカル検証済み",
+      "diagram": "aws-cd-stage1",
+      "one": "EC2へPATを置かず、本人承認・署名・短時間の配信許可を組み合わせる。",
+      "points": [
+        "OIDCはGitHubの身元証明、STSは短期AWS資格情報、IAMは操作できる範囲。",
+        "SSMは固定の実行入口。DynamoDBは配信の許可・停止・使用済みを記録する台帳。",
+        "GitHub変数falseは開始の抑止。進行中の停止はAWS側STOP、Actions停止時はLEASEの期限切れ。"
+      ],
+      "why": "EC2に長期のGitHub PATを保管・更新する負担を避けるため。本人承認だけでなく、署名で発行元と対象SHA・digest・schema・操作範囲を検査する。候補確認と公開は別の許可にする。",
+      "proof": "新CD95件・既存イメージ照合3件・業務42件が成功。型検査・lint・YAML/JSON解析が成功。暗号試験はメモリ内の一時Ed25519鍵で行った。GitHub/Sigstoreの実証明やAWS認可が成功した意味ではない。",
+      "pending": "実署名の完全オフライン検証、OIDCの実subject、IAM/SSMの実認可、Linux上の実Docker/Nginx復旧は未検証。全0の固定SHAと設定例の未設定値は意図的な導入ブロック。AWS基盤・EC2配置・pushは未実施。buildは同じコマンドを承認された通常権限で実行して成功。保護設定は変更していない。",
+      "question": "Actionsをキャンセルしたら、EC2で実行中のDocker操作も瞬間的に止まる？",
+      "answer": "止まるとは限らない。Actionsの許可更新が途絶え、EC2が期限切れを検知して中止する。切替後なら旧経路へ戻す。STOP要求を受け付けたことと、EC2の復旧が完了したことは別々に確認する。",
+      "pitch": "本人承認を通った固定ワークフローだけが署名付き指示を発行する設計です。EC2ではSHA・digest・DB構造と期限を照合し、許可失効や通信断で止めます。今回はローカルの模擬試験までで、本番導入はまだです。",
+      "exercise": "contract.mjsのvalidateSnapshotを読み、STOP・世代・LEASEの3つがそれぞれ何を防ぐか1文ずつ書く。練習問題：候補試験中にSTOPが届いたらNginxは変わる？ 解答：変わらない。publish許可と切替前の再確認の両方が必要。",
+      "code": {
+        "file": "deploy/aws/contract.mjs / validateSnapshot（実コードの1行）",
+        "text": "need(!stop, 'STOP_PRESENT');"
+      },
+      "files": [
+        "deploy/aws/contract.mjs",
+        "deploy/aws/engine.mjs",
+        "deploy/aws/ledger.mjs",
+        "deploy/aws/verify-attestation.mjs",
+        "tests/aws-cd.test.mjs",
+        "docs/AWS_CD_STAGE1.md"
+      ]
+    },
+    {
+      "id": "aws-cd-review-fixes",
+      "title": "新CD：保存できたか分からない時は？",
+      "status": "ローカル修正済み",
+      "diagram": "aws-cd-review-fixes",
+      "one": "通信の失敗と、保存の失敗は同じではない。確定の証拠を確認してから戻す。",
+      "points": [
+        "FINALは配信が確定した記録。STOP・世代・期限を条件に、一括で成立させる。",
+        "応答が消えたらFINALを確認する。未確定ならABORTを記録し、遅れた完了と復旧の競合を防ぐ。",
+        "復旧も同じ鍵を取る。現在のrelease IDと違う古い記録では戻さず、事故記録を先に残す。"
+      ],
+      "why": "「通信が失敗したから未保存」と決めると、後から保存が成立して復旧と食い違うため。確定点を台帳にそろえ、分からなければ次の配信を止める。新しいAWSサービスは増やしていない。",
+      "proof": "既存140件と追加46件、計186件成功。実ドライバーメソッド・実ファイル・共通ロックを利用。3件はWindowsで実Node子プロセスを強制終了して復旧。AWS/Docker/Nginxの通信は代用品。型検査・lint・build成功。",
+      "pending": "Linuxのsystemd・実Docker/Nginx・実AWS transaction・実GitHub署名は未検証。外部Actionと実装/署名元の未確定pinは全0で導入を拒否。停止状態のAWS基盤構築は別承認待ち。本番導入とGitHub反映はNO-GO。",
+      "question": "サーバーから「保存しました」が返って来なかったら、未保存と決めてよい？",
+      "answer": "決められない。保存後の返事だけが消えた可能性がある。FINALを確認し、なければ遅れた保存を禁止するABORTとの排他的な処理で判断する。確認自体ができなければ、事故記録とロックを残して止まる。",
+      "pitch": "レビューで見つかった確定タイミングと復旧の競合を修正しました。台帳の条件付き記録を確定点にし、復旧も同じ排他制御にしました。Windowsでの実プロセス終了を含めて検証しましたが、本番AWSでの確認はまだです。",
+      "exercise": "engine.mjsのledger.finishを探す。awaitは処理の完了を待つ記号、mは対象の配信指示、now()は現在時刻を返す関数。練習：FINALが成立した後でSTOPしたら？ 解答：確定済みを自動では戻さず次の配信を止める。公開を戻すには別承認が必要。",
+      "code": {
+        "file": "deploy/aws/engine.mjs / runRelease（実コードの抜粋）",
+        "text": "await ledger.finish(m,now());committed=true;"
+      },
+      "files": [
+        "deploy/aws/engine.mjs",
+        "deploy/aws/decision.mjs",
+        "deploy/aws/release-lock.mjs",
+        "deploy/aws/recovery.mjs",
+        "tests/aws-cd-recovery.test.mjs",
+        "docs/AWS_CD_STAGE1.md"
+      ]
     }
+  ,
+{
+  "id": "manual-first-public-release",
+  "title": "初回公開：いま動く版を安全に表へ出す",
+  "status": "Next.js初回公開成功",
+  "diagram": "manual-first-public-release",
+  "one": "公開の入口をNext.jsへ切り替え、ログインから案件保存・ログアウトまで確認できた。",
+  "points": [
+    "検証枠を所有者UID1000へ合わせた。秘密ファイルは600のまま、コードは標準入力から渡す。",
+    "新workerと公開ready200/ok:trueを3回確認。ログイン・Cookie・テスト案件37%保存/再取得・ログアウトに成功。",
+    "Next.js公開を維持。旧Vinextは復旧用に稼働し、既存案件とコンテナは変えていない。"
   ],
+  "why": "秘密ファイルを他人も読めるようにせず、必要な検証処理だけを正当な所有者として実行するため。最小権限とは、必要な人・処理に必要な操作だけを許すこと。",
+  "proof": "公開HTTPS経由のHTTP試験すべて成功。CookieはSecure/HttpOnly/SameSite=Lax。新規案件を除くProjectの指紋とコンテナID/開始時刻は一致、MySQL healthy、Nginx error以上0件。Windowsからも証明書検証付きでok:true。",
+  "pending": "今回の実ブラウザークリック試験・実EC2再起動・長期監視・日次自動バックアップは未検証/未整備。初回版は11月17日の既存イメージ。差分表示・決定事項・招待等は未完成。以前の404の原因は確定扱いにしない。",
+  "question": "アカウントを読めない検証処理に対して、今回どこを直した？",
+  "answer": "秘密ファイルの600を緩めず、検証枠を所有者UID1000へ合わせた。root所有コードの読取問題を避けるため、非秘密のコードは標準入力から渡した。特権削除・swap/core/log禁止も維持し、公開変更前に通信なしで準備確認した。",
+  "pitch": "既存AWSを再利用してNext.jsとMySQLを公開しました。公開経路でログイン・保護Cookie・案件保存・再取得・ログアウトを確認し、旧版を復旧用に残しました。アカウントの権限不一致は秘密ファイルを緩めず検証側のユーザーを合わせて解消しました。",
+  "exercise": "docs/MANUAL_PUBLIC_RELEASE.mdの最新結果を読む。練習：--user 1000:1000、-i、--cap-drop ALLの役割を説明しよう。解答：所有者として実行、非秘密コードを標準入力で受け取る、余計なLinux特権を外す。ログイン成功と、未実装の新規登録・招待を区別して説明しよう。",
+  "code": {
+    "file": "docs/MANUAL_PUBLIC_RELEASE.md（実行した検証コマンドの抜粋。単独実行するコマンドではない）",
+    "text": "--user 1000:1000 --cap-drop ALL --read-only\n--memory 128m --memory-swap 128m --ulimit core=0\n--log-driver none -i --input-type=module"
+  },
+  "files": [
+    "docs/MANUAL_PUBLIC_RELEASE.md",
+    "deploy/manual-public.py",
+    "docs/AWS_DEPLOY_RUNBOOK.md",
+    "README.md"
+  ]
+}
+],
   "journal": [
+{
+  "date": "2026-11-21",
+  "title": "公開実績の11ファイルをGitHub用に整理",
+  "changes": [
+    "AWS識別子と個人PCパスを匿名化し、公開用スクリプトはEBS照合で止まる仮値へ変更。",
+    "READMEに公開実績・未完成機能・自動デプロイ未導入を明記。",
+    "手動公開の資料・運用コード・テストだけを対象とし、保留中CDとローカル生成物は分離。"
+  ],
+  "why": "稼働中の設定を変えずに、公開実績を説明できる資料と再利用可能な運用コードを公開するため。",
+  "proof": "対象は11ファイル。学習履歴・テーマIDは保持。既存のCD関連・ローカル指示・キャッシュは今回変更しない。秘密情報とステージ対象はコミット前に別途照合する。",
+  "limit": "EC2設定変更・push・Actions実行は対象外。公開用スクリプトは仮値を実構成へ合わせるまで実行不可。保留中CDのソースはGitHub未反映。",
+  "topic": "manual-first-public-release",
+  "files": [
+    "README.md",
+    "docs/MANUAL_PUBLIC_RELEASE.md",
+    "deploy/manual-public.py",
+    "tests/manual-public.test.py"
+  ]
+},
+{
+  "date": "2026-11-21",
+  "title": "Next.js＋MySQLの初回公開と認証・保存確認に成功",
+  "changes": [
+    "検証枠を所有者UID1000へ合わせた。秘密ファイルは600のまま、コードは標準入力から渡す。",
+    "新workerと公開ready200/ok:trueを3回確認。ログイン・Cookie・テスト案件37%保存/再取得・ログアウトに成功。",
+    "Next.js公開を維持。旧Vinextは復旧用に稼働し、既存案件とコンテナは変えていない。"
+  ],
+  "why": "秘密ファイルを他人も読めるようにせず、必要な検証処理だけを正当な所有者として実行するため。最小権限とは、必要な人・処理に必要な操作だけを許すこと。",
+  "proof": "公開HTTPS経由のHTTP試験すべて成功。CookieはSecure/HttpOnly/SameSite=Lax。新規案件を除くProjectの指紋とコンテナID/開始時刻は一致、MySQL healthy、Nginx error以上0件。Windowsからも証明書検証付きでok:true。",
+  "limit": "今回の実ブラウザークリック試験・実EC2再起動・長期監視・日次自動バックアップは未検証/未整備。初回版は11月17日の既存イメージ。差分表示・決定事項・招待等は未完成。以前の404の原因は確定扱いにしない。",
+  "topic": "manual-first-public-release",
+  "files": [
+    "docs/MANUAL_PUBLIC_RELEASE.md",
+    "deploy/manual-public.py",
+    "docs/AWS_DEPLOY_RUNBOOK.md",
+    "README.md"
+  ]
+},
+{
+  "date": "2026-11-21",
+  "title": "新worker・公開readyを確認後、アカウント準備で停止",
+  "changes": [
+    "新worker確認と新しいTLS接続で、公開ready200/ok:trueを3回連続確認。",
+    "検証枠とアカウントファイルの所有者が合わず、ログイン前に停止。秘密ファイルは緩めない。",
+    "旧画面の静的ファイル参照とHTTPS200を3回連続確認し、Vinextへ復帰。追加再試行なし。"
+  ],
+  "why": "切替完了待ちを追加し、旧版への復帰も応答コードだけで判断しない。別の検証枠の不備があっても秘密保護を緩めて進めない。",
+  "proof": "検証ロジックのモック10件成功。今回1回の実切替で公開ready3回成功、Next画面の静的参照一致。切り戻し後も3コンテナのID/開始時刻不変、MySQL healthy、Nginx error以上0件。",
+  "limit": "Cookie・ログイン・案件作成/保存/再取得/ログアウトは未実施。現在公開はVinext。以前の404の原因は確定扱いにしない。検証用UIDと非秘密コードの渡し方を合わせる修正案は未実施。",
+  "topic": "manual-first-public-release",
+  "files": [
+    "docs/MANUAL_PUBLIC_RELEASE.md",
+    "docs/AWS_DEPLOY_RUNBOOK.md"
+  ]
+},
+{
+  "date": "2026-11-21",
+  "title": "公開readiness 404を検知し、Vinextへ切り戻し",
+  "changes": [
+    "直前の候補・DB・証明書・S3保存版・資源余力は正常。",
+    "Nginx構文検査とreload後、公開readinessが404となり旧3002へ復帰。",
+    "ログインと案件操作へ進まず、正式DBへの業務書き込みなし。Next.js公開は未完了。"
+  ],
+  "why": "公開経路で応答できない状態のままログインやDB書き込みへ進まないため。本人承認済みの切り戻しだけを実施し、予定外の修正は行わない。",
+  "proof": "旧HTTPS200、Nginx内容は退避設定と一致。候補直接ready200、MySQL healthy、コンテナID/開始時刻不変。試行時刻のNginxエラーログにerror以上0件。",
+  "limit": "公開経由404の原因は未確定。公開Cookie・ログイン・テスト案件作成/保存/再取得/ログアウトは未実施。reload直後の旧worker到達などは可能性であり断定しない。追加修正・再公開は未実施。",
+  "topic": "manual-first-public-release",
+  "files": [
+    "docs/MANUAL_PUBLIC_RELEASE.md",
+    "docs/AWS_DEPLOY_RUNBOOK.md"
+  ]
+},
+{
+  "date": "2026-11-21",
+  "title": "既存Next.js候補の手動公開準備",
+  "changes": [
+    "11月17日の候補を固定。最新mainと同じ版とは断定しない。",
+    "EBSを照合して同じコンテナだけを起動。5分ごとに状態だけを上限付きで記録。",
+    "最新DBを暗号化してS3へ保存。Nginxの旧設定を退避し、切り替えは別承認。"
+  ],
+  "why": "新CDの完成を待たずに本体を公開するため。再作成やDB初期化を避け、今の正常な候補と旧サイトを保持する。systemdはLinuxの起動順を管理する仕組み。readinessはDBも含めて応答できるかの確認。",
+  "proof": "S3のVersionId・サイズ4,290 bytes・SHA-256と再取得が一致。旧HTTPS200、候補ready、MySQL healthy、コンテナID/開始時刻・Nginx不変。モック9件と業務42件成功、型検査/lint成功。",
+  "limit": "実EC2再起動、新unitでの停止からの復帰、長期ログローテーション、公開切替/ブラウザー操作は未検証。ローカルbuildは既存保護フォルダーの探索権限エラー。保護は緩めず、既存イメージも変更していない。",
+  "topic": "manual-first-public-release",
+  "files": [
+    "deploy/manual-public.py",
+    "deploy/siteflow-next-public.service",
+    "deploy/siteflow-mysql-manual-public.conf",
+    "deploy/siteflow-public-health.timer",
+    "tests/manual-public.test.py",
+    "docs/MANUAL_PUBLIC_RELEASE.md"
+  ]
+},
+{
+    "date":  "2026-11-21",
+    "title":  "AWSの読み取りを自動化・組織制限で構築保留",
+    "changes":  [
+                    "既存CloudShellを自動操作し、SSM用ポリシーv2の全文を確認。",
+                    "OIDC確認のSCP拒否を記録し、新規リソース作成を保留。",
+                    "高度な機能の有効化は別承認が必要と整理。"
+                ],
+    "why":  "操作の自動化と、AWS側で許可される操作は別だから。SCPは組織全体の操作上限を決めるルール。",
+    "proof":  "自動のポリシー読み取り成功。本人の確認では対象EC2正常・公開HTTPS 200。AWS設定変更・リソース作成なし。",
+    "limit":  "適用SCP本文と候補アプリ・MySQLの現在のプロセス状態は未確認。基盤構築未完了。高度な機能の有効化は不可逆で別承認。",
+    "topic":  "aws-cd-review-fixes",
+    "files":  [
+                  "docs/AWS_CD_STAGE1.md"
+              ]
+},
+    {
+      "date": "2026-11-21",
+      "title": "新CDの確定・停止・復旧を修正",
+      "changes": [
+        "実行コードを固定し、未確認の保護設定とpinを拒否。",
+        "FINAL/ABORT・共通ロック・事故先行保存・完了候補必須へ修正。",
+        "実ドライバーと強制終了を含む46件を追加し、既存140件も維持。"
+      ],
+      "why": "テスト代用品だけでは見えなかった、確定後の結果不明と復旧の競合を防ぐため。",
+      "proof": "186件成功、型検査・lint・build成功。実Windows子プロセス終了3件。通信先・Linuxホスト設定は代用品。",
+      "limit": "AWS/GitHub変更なし。実認可・署名・Linuxサービス復旧・Action未確定pinは未検証。基盤構築は別承認待ち、本番導入はNO-GO。",
+      "topic": "aws-cd-review-fixes",
+      "files": [
+        "docs/AWS_CD_STAGE1.md",
+        "deploy/aws/engine.mjs",
+        "tests/aws-cd-recovery.test.mjs"
+      ]
+    },
+    {
+      "date": "2026-11-20",
+      "title": "PAT不要の新CDをローカルで実装・試験",
+      "changes": [
+        "署名付き指示と世代・期限・一回限りの配信許可を追加。",
+        "CIと本人承認付き配信を分離し、AWS側停止・復旧処理を追加。",
+        "IAM/SSM/systemd案、95件のローカル試験と未検証条件を記録。"
+      ],
+      "why": "長期トークンをEC2へ渡さず、停止時に古い承認を復活させないため。",
+      "proof": "新CD95件・イメージ3件・業務42件成功。型検査・lint・YAML/JSON成功。既存の履歴・自己チェック用IDを保持。",
+      "limit": "本番未導入・GitHub/AWS実認可未検証・全0pin未解決。buildは既存保護フォルダー走査で一度失敗し、承認された通常権限で成功。公開NO-GO。",
+      "topic": "aws-cd-stage1",
+      "files": [
+        "docs/AWS_CD_STAGE1.md",
+        "deploy/aws/engine.mjs",
+        ".github/workflows/siteflow-deploy.yml"
+      ]
+    },
+    {
+      "date": "2026-11-20",
+      "title": "Windows PAT試験の本人成功報告・EC2への安全な受け渡し準備",
+      "changes": [
+        "本人報告のWindows GET8件成功を記録。",
+        "SSH/SSM・保存権限・ログ・期限の確認手順を整理。",
+        "独立EC2 GETチェッカーをローカル準備し構文確認。"
+      ],
+      "why": "CDを動かさずにEC2の認証経路を検証し、秘密値の誤記録を防ぐため。",
+      "proof": "本人報告：Windows専用PATのGET8件すべてHTTP200、release=false、保護設定・main/CI・承認待ち・artifact0件を確認。AIは秘密値を受領していない。今回のローカルEC2 GETチェッカーはGit Bashのbash -n構文確認成功。スクリプト本体とAPIは未実行。",
+      "limit": "EC2への接続・転送・配置は未実施。現在のSSH/SSM/sudo/監査ログ設定、実際のPAT期限日時、EC2でのGET・jq応答判定は未確認。受信/送信コードは未実装。CD停止、production未承認、本番公開NO-GOを維持。",
+      "topic": "ec2-pat-readonly-preparation",
+      "files": [
+        "docs/EC2_PAT_READONLY_PLAN.md",
+        "work/ec2-pat-get-only.sh",
+        "work/check-siteflow-pat-readonly.ps1"
+      ]
+    },
+    {
+      "date": "2026-11-19",
+      "title": "PR #5をmainへmerge・GHCR保存成功・production承認待ち",
+      "changes": [
+        "通常mergeでmainへ統合しSHAを照合。",
+        "mainのCI成功とGHCRの2イメージを確認。",
+        "承認待ち・artifact 0件を確認し、本番無変更を維持。"
+      ],
+      "why": "本人承認の範囲でコード統合と配信準備を完了し、本番操作の境界で止めるため。",
+      "proof": "PR #5を通常mergeでmainへ統合。SHA e0cc78f258bbe4f6b2446eec1025e0e3820e6093とActions run 44531879015の対象SHAが一致。docker-build成功、Linux103件・image3件・業務42件・Compose5件・HTTP成功。GHCRアプリ/migrationのタグ・digest・revisionを直接読み取り照合。production承認待ち、artifact 0件。",
+      "limit": "productionは未承認、全体runはwaiting。EC2・MySQL・Nginxへの操作なし。実トークン権限、実配信・復旧検証は残課題。本番公開NO-GOを維持。",
+      "topic": "main-merged-awaiting-approval",
+      "files": [
+        ".github/workflows/ci.yml",
+        "deploy/image-record.mjs",
+        "deploy/release-record.mjs",
+        "work/main-merge-result-20261119.json"
+      ]
+    },
+    {
+      "date": "2026-11-19",
+      "title": "PR #5のCI最終成功とproduction設定を読み取り確認",
+      "changes": [
+        "GitHub上のCI最終結果とテスト件数を記録。",
+        "保存済みproduction保護設定とfalseを再確認。",
+        "本番公開NO-GOと未検証事項を維持。"
+      ],
+      "why": "ローカルでの成功とGitHubでの実測結果を区別するため。",
+      "proof": "PR #5 / run 44528884795 は completed・success。docker-build成功。Linux配信103件、イメージ照合3件、業務42件、Compose設定5件、アプリ・migrationビルド、HTTP確認が成功。release-approvedとGHCR送信はPR条件によりスキップ。失敗・未完了なし。",
+      "limit": "実トークンによるGitHub API権限確認、実環境での配信・復旧確認は未実施。本番公開は引き続きNO-GO。今回、追加commit/push・マージ・EC2操作・設定変更なし。",
+      "topic": "pr5-ci-success",
+      "files": [
+        ".github/workflows/ci.yml",
+        "work/pr5-ci-final-20261119.json"
+      ]
+    },
+    {
+      "date": "2026-11-19",
+      "title": "190件を専用branchへcommit/pushし、Actions0件と本番無変更を確認した",
+      "changes": [
+        "明示した190件をstage後に再検査し、文書末尾空行1件のみ整えてcommit。",
+        "専用branchのみpush。GitHub SHA一致、main不変、Actions0/PR0を確認。",
+        "EC2前後の3コンテナ/Nginx/HTTPSを読取比較。この学習追記はローカルだけ。"
+      ],
+      "why": "GitHubへの保存・CIでの検査・本番公開を別々に確認し、勝手にPRや公開へ進まないため。",
+      "proof": "GitHub refが788d76004df6f4fe8807fe6f9e86e44c21e77dafと一致。commitの190ファイルとstage blob一致。main不変、Actions0/PR0。EC2前後の識別情報/config一致、旧Vinext/Next候補/MySQL/Nginx正常、HTTPS200。",
+      "limit": "PR作成とCI実行、mainマージ、EC2専用API実tokenの権限確認、CD導入/起動復帰/公開は未承認または未検証。この追記を含む追加commit/pushはしていない。",
+      "topic": "dedicated-branch-pushed",
+      "files": [
+        ".github/workflows/ci.yml",
+        "docs/GITHUB_PUSH_AUDIT.md",
+        "docs/GITHUB_REVIEW.md",
+        "docs/DATABASE_BACKUP_CHECK.md"
+      ]
+    },
     {
       "date": "2026-11-19",
       "title": "送信190件とEC2の停止/正常性を読み取り確認し、検証branch準備をGOと判定",
@@ -3839,7 +4250,7 @@
         "自動mount/DB未設定の区別を記録へ反映。"
       ],
       "why": "既存dataを隠さず追加diskだけを専用dirへ接続し、旧公開を守りながら次の保存先設定へ進めるため。",
-      "proof": "06:40 JST、UUID276f374a-7e33-4ff0-b6f4-b0f185280cd6のXFSを/srv/siteflow-mysqlへmount。3種のprobe一致、root/fstab/Nginx/3container不変、HTTPS200。",
+      "proof": "06:40 JST、UUID<DATA_EBS_UUID>のXFSを/srv/siteflow-mysqlへmount。3種のprobe一致、root/fstab/Nginx/3container不変、HTTPS200。",
       "limit": "自動mount/DB起動保護/DB用subdir/Docker volume/MySQL/Next/push/公開は未実施。再起動で自動接続する設定はまだなく、DB保存/backup復元は未検証。",
       "topic": "aws-reuse-plan",
       "files": [
@@ -4113,7 +4524,7 @@
         "同じEC2/EBS/公開IPとHTTPS正常、旧CD休止を再確認。"
       ],
       "why": "最新バックアップを確保した後も、停止/サイズ変更/起動を勝手に続けず、確認できた範囲を明確にするため。",
-      "proof": "新snap-0e59ef6e9a1635889は11月16日作成/完了をユーザー確認。20:32 JSTに同じEC2/EBS/公開IP、旧CD休止、旧版HTTPS正常をSSH確認。旧snapshotも保持。",
+      "proof": "新snap-<SNAPSHOT_ID>は11月16日作成/完了をユーザー確認。20:32 JSTに同じEC2/EBS/公開IP、旧CD休止、旧版HTTPS正常をSSH確認。旧snapshotも保持。",
       "limit": "新snapshotの作成時刻や共有/暗号化等の最終照合、実復元試験、EC2停止・サイズ変更・起動は未実施。停止/変更/起動は1操作ずつ承認。",
       "topic": "aws-reuse-plan",
       "files": [
@@ -5595,7 +6006,7 @@
       "ログイン状態を扱う記録。有効期限などを持つ。"
     ]
   ],
-  "sourceRoot": "C:/Users/syucream/Projects/siteflow",
+  "sourceRoot": "<LOCAL_PATH>",
   "sourceReviewDate": "2026-11-15",
   "codeVocabulary": [
     [
@@ -5745,6 +6156,10 @@
   }
   function note(text){return '<p class="diagram-note">'+text+'</p>';}
   function diagram(kind,state){
+    if(kind==="manual-first-public-release"){
+      return flow([["公開HTTPS","証明書を検証して接続","good"],["Nginx → Next.js3001","公開readyを3回確認","good"],["正式MySQLへ保存","ログイン → 案件37% → 再取得 → ログアウト","good"]])+note("2026-11-21初回公開成功。旧Vinext3002は復旧用に保持。今回の業務操作は公開HTTPSのプログラム試験で、ブラウザーUIクリック試験とは別。");
+    }
+
     if(kind==="aws-cd-final-audit"){
       var releases=[[["main pushでCI","検査・GHCR保存まで"],["旧CDは停止","3001/3002を勝手に入替えない"],["いまの公開はVinext","Nginx → 3002のまま"]],[["production本人承認","同SHA・2image digest・実設定"],["正式DBの実接続を確認","復元DBや検証userを使わない"],["公開切替は別承認","候補ready → Nginx → HTTPS/slot確認"]],[["再配信をpaused","配信lockで競合させない"],["経路を旧3002へ","構文確認・reload・外部確認"],["正式DBは巻き戻さない","Nextのデータを保持して原因調査"]]];
       return flow(releases[state].map(function(s){return [s[0],s[1],"good"];}))+note("現在は新production環境/新CD未導入。図の承認付き切替やrollbackを実EC2で実行した結果ではない。");
@@ -5764,6 +6179,12 @@
       return flow(backup[state].map(function(s){return [s[0],s[1],"good"];}))+note("今回の架空データでAPI操作まで合格。ブラウザーUI・別EC2での復旧・日次運用は別の確認。");
     }
 
+    if(kind==="aws-cd-review-fixes"){
+      return flow([["最後の許可を確認","STOP・世代・期限"],["台帳で確定を裁定","FINALかABORTの片方"],["結果を保存・確認","不明なら事故記録とロック"]])+note("確定前のSTOPなら戻す。確定後のSTOPは次の配信を止める。古い記録で別の配信を巻き戻さない。説明図はAWS・DBを操作しない。");
+    }
+    if(kind==="aws-cd-stage1"){
+      return flow([["本人承認と署名","CI・main・SHA・digestを固定"],["AWSの短期許可","STOP・世代・期限・使用済み"],["候補を確認","publishだけ公開切替"]])+note("配信途中の停止はAWS側STOP。Actions停止時は許可更新が途絶え、期限切れをEC2が検知する。切替後なら旧経路へ復旧。これは説明図であり本番を操作しない。");
+    }
     if(kind==="local-release-gate"){
       var steps=[[["CIで検査","まだ公開の許可ではない"],["本人が承認","同じSHA・digestを記録"],["CDで照合","別runや不明な版なら止める"]],[["DB構造変更を検証","TLS・実構造・履歴を確認"],["schemaHashを照合","同じ設計か確かめる"],["候補のreadiness","DB・会議テーブルが読めるか"]],[["HTTPSで切替を確認","正しい枠の応答を3回連続"],["失敗なら旧系へ戻す","候補も保持し接続を守る"],["事故記録でCD停止","原因確認前に再配信しない"]]];
       return flow(steps[state].map(function(s){return [s[0],s[1],"good"];}))+note("ローカルでの検証結果。本物のGitHub承認・EC2/Vinextの切替や停止はまだ実施していない。");

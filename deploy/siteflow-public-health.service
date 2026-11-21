@@ -1,0 +1,12 @@
+[Unit]
+Description=SiteFlow bounded non-secret health record
+After=docker.service
+ConditionPathIsMountPoint=/srv/siteflow-mysql
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/lib/siteflow/manual-public.py monitor
+MemoryMax=128M
+MemorySwapMax=0
+LimitCORE=0
+TimeoutStartSec=45
