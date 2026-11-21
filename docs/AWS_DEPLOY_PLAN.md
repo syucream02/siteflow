@@ -1,5 +1,9 @@
 # SiteFlowを公開・検証し、安全に休止・再公開する計画
 
+> 公開用資料：環境固有の識別子・個人PCパスは匿名化。仮値のコマンドはそのまま実行しないでください。公開は手動で、自動デプロイは未導入です。後段のCD関連は過去の設計・ローカル検証を含み、GitHub未反映の資料・コードがあります。
+
+> 最新（2026-11-21 11:58 JST）：**既存のNext.js候補を初回版として手動公開し、公開HTTPSでのログイン・Cookie・架空案件の作成/保存/再取得・ログアウトを確認。公開状態を維持。** 旧Vinextは稼働を継続し、新CD/OIDCは保留。今回の実測・未検証・復旧手順は [手動公開記録](MANUAL_PUBLIC_RELEASE.md) を優先する。以下の「未公開」「S3未構築」等は過去の履歴。
+
 最新（2026-11-17 21:21 JST）：**PC実Chromeの非公開HTTPSでログイン・案件保存35％・再読み込み・ログアウトに成功**。証明書dry-run/再読込hook/通常renew正常（実証明書の期限延長なし、11月21日15:26 JST）。候補だけの停止再開と保存保持も成功、旧Vinext/Nginxルーティング維持・HTTPS200。S3/IAMは承認待ち、GitHub production未作成、CD/公開経路変更はローカル準備のみ。詳細は[21節](PREDEPLOY_VALIDATION.md#21-公開前準備証明書非公開ブラウザー復旧cd)。後段は過去の履歴を含む。
 
 
@@ -18,9 +22,9 @@
 
 最新のB準備（11月17日06:01 JST）：読み取りでAZ **ap-southeast-2c**、既存diskはroot20GiBのみ、追加path/fstab未存在を確認。[作成値と画面別手順](PREDEPLOY_VALIDATION.md#13-b準備ebs作成値と画面別手順2026-11-17)。ユーザーの最新指定により、Bは作成/attach/format/mountをそれぞれ個別承認する。今回は作成前の提示のみ。Dockerの自動再起動がhost guardを迂回し得るため、DB専用systemd＋mount依存とDB restart明示管理の補強を初回DB起動条件に追加（未実装/未適用）。
 
-その後ユーザーがB1作成/B2attachを手動実施と報告。新VolumeIdは`vol-01a737715ed956301`、AWS名`/dev/sdf`。06:26 JSTに同EC2で10GiBの`/dev/nvme1n1`へVolumeId/serial/ebsnvme-id一致、FS署名/UUID/mountなしを読み取り確認した。[調査と次の承認単位](PREDEPLOY_VALIDATION.md#14-ユーザー作成接続後のnvme読み取り照合2026-11-17)。format/mount/fstab/MySQL/既存公開の変更は行っていない。次はB3のXFS formatだけを承認対象にする。
+その後ユーザーがB1作成/B2attachを手動実施と報告。新VolumeIdは`vol-<VOLUME_ID>`、AWS名`/dev/sdf`。06:26 JSTに同EC2で10GiBの`/dev/nvme1n1`へVolumeId/serial/ebsnvme-id一致、FS署名/UUID/mountなしを読み取り確認した。[調査と次の承認単位](PREDEPLOY_VALIDATION.md#14-ユーザー作成接続後のnvme読み取り照合2026-11-17)。format/mount/fstab/MySQL/既存公開の変更は行っていない。次はB3のXFS formatだけを承認対象にする。
 
-最新：B3 formatだけをユーザー承認後、06:34 JSTに同VolumeId/10GiB/nvme1n1/署名・mountなしを再確認しXFS作成成功。**UUID=276f374a-7e33-4ff0-b6f4-b0f185280cd6、label=SITEFLOW_DB、未mount**。root metadata/fstab/Nginx/3containerは前後一致、HTTPS200。[実施結果](PREDEPLOY_VALIDATION.md#15-b3承認後の新10gib-xfsフォーマット結果)。次はB4 mountだけを別承認。DB/Next/push/公開は含めない。
+最新：B3 formatだけをユーザー承認後、06:34 JSTに同VolumeId/10GiB/nvme1n1/署名・mountなしを再確認しXFS作成成功。**UUID=<DATA_EBS_UUID>、label=SITEFLOW_DB、未mount**。root metadata/fstab/Nginx/3containerは前後一致、HTTPS200。[実施結果](PREDEPLOY_VALIDATION.md#15-b3承認後の新10gib-xfsフォーマット結果)。次はB4 mountだけを別承認。DB/Next/push/公開は含めない。
 
 最新B4：06:40 JST、手動mountだけの承認後、同VolumeId/UUID/XFS/既存mountなし/接続先にdataなしを再照合。空dirを作りUUIDで`/srv/siteflow-mysql`へmount、findmnt/lsblk/df一致、空き約9.84GiB。root/fstab/Nginx/3container不変、HTTPS200。[実測16節](PREDEPLOY_VALIDATION.md#16-b4承認後の手動マウント結果)。自動mount/fstab/Docker設定/DB/Next/pushは未実施。
 
@@ -77,12 +81,12 @@ A/B/Cは各群ごとの承認。群内の低リスク確認を逐一承認で止
 - 現在許可された作業：具体案の提示後に「お願いします」の承認を受け、CI/CD・起動定義・公開migration・切替/復旧をローカル実装/検証した。現状と使い方は[ローカル検証記録](LOCAL_DOCKER_CHECK.md)、本番への順序は[AWS手順書](AWS_DEPLOY_RUNBOOK.md)。
 - 今回実施しない作業：AWS設定変更、EC2停止・サイズ変更、GitHub設定変更、commit/push、本番切替・停止・再開。これらは引き続き個別の実行承認が必要。2026年11月16日12:27〜12:32 JSTに、承認済みのSSH/AWS/GitHub読み取り調査だけを実施した。
 - 優先する仕様：確定済みの要件定義と最新のユーザー指定。アーカイブ・復元は現在所属するチーム管理者または案件の主担当のみ。副担当だけでは許可しない。
-- 最新のIP確認：2026年11月16日、ユーザーがAWSコンソールで `13.237.188.172` がElastic IPで、`i-04201e271c824ac02` への関連付けを確認したと申告。解放/関連付け解除せず維持する。次の旧CD休止の具体案は[AWS手順書12節](AWS_DEPLOY_RUNBOOK.md#12-elastic-ipの確認と旧cd休止の実行案)。EC2停止・サイズ変更等は未承認のまま。
+- 最新のIP確認：2026年11月16日、ユーザーがAWSコンソールで `13.237.188.172` がElastic IPで、`i-<INSTANCE_ID>` への関連付けを確認したと申告。解放/関連付け解除せず維持する。次の旧CD休止の具体案は[AWS手順書12節](AWS_DEPLOY_RUNBOOK.md#12-elastic-ipの確認と旧cd休止の実行案)。EC2停止・サイズ変更等は未承認のまま。
 - 最新の実施結果：旧CDタイマーだけの休止を個別承認後、2026年11月16日19:00 JSTにstop/disableを実施した。inactive/disabled、service停止中/ロックなし、同じ旧版コンテナ・Nginx設定、HTTPS200/TLS検証成功を確認。[手順書13節](AWS_DEPLOY_RUNBOOK.md#13-旧自動配信タイマーの休止結果)。EC2本体やAWSリソース設定、GitHub設定/push、本番切替は変更/実行していない。冒頭の実施しない作業とは別に承認された限定操作である。
 - 最新のEBS確認：ユーザーがgp3/20GiB/暗号化なし/終了時削除「はい」をコンソール確認。公開gp3単価を参照して13節の見積もりを更新し、[手順書14節](AWS_DEPLOY_RUNBOOK.md#14-ebs確認後の容量対策とサイズ変更案)へ停止/2GB化/起動の実行案を具体化した。これらの操作は未承認・未実施。
-- 最新の停止前条件：ユーザーが旧snapshot `snap-0666dfa96de083c80`（10月11日13:48 JST、8GiB、完了、非暗号化、同じ元EBS）を確認。削除しない。現在20GiBの最新snapshotを承認後に1件取得/完了確認し、結果を報告してから停止・タイプ変更・起動を1操作ずつ承認する。[手順書15節](AWS_DEPLOY_RUNBOOK.md#15-既存スナップショットの保管と最新バックアップ作成案)。稼働中ルートの整合性と復元テスト未実施を区別する。新規snapshotはまだ未作成。
+- 最新の停止前条件：ユーザーが旧snapshot `snap-<SNAPSHOT_ID>`（10月11日13:48 JST、8GiB、完了、非暗号化、同じ元EBS）を確認。削除しない。現在20GiBの最新snapshotを承認後に1件取得/完了確認し、結果を報告してから停止・タイプ変更・起動を1操作ずつ承認する。[手順書15節](AWS_DEPLOY_RUNBOOK.md#15-既存スナップショットの保管と最新バックアップ作成案)。稼働中ルートの整合性と復元テスト未実施を区別する。新規snapshotはまだ未作成。
 - 作成承認後の結果：11月16日20:13〜20:15 JSTに業務DBが見つからないことを確認し、sync/HTTPS確認を実施。CreateSnapshot dry-runは権限不足、ブラウザーも接続不可で新snapshotは未作成。ユーザーの既存コンソール作成へ引き継ぐ。[手順書16節](AWS_DEPLOY_RUNBOOK.md#16-承認後の事前確認と作成経路の制約)。作成承認は受領済みで、追加IAM許可やEC2停止を承認されたわけではない。
-- 最新のバックアップ完了：ユーザーが手動作成した `snap-0e59ef6e9a1635889`（元vol-042befaf03ffe5cb7、11月16日作成、完了/100％、旧snapshot保持）を確認。作成時刻は未提供、復元試験は未実施。20:32 JSTに同じEC2/EBS/公開IP、旧CD休止、旧版HTTPS正常をSSH確認した。[手順書17節](AWS_DEPLOY_RUNBOOK.md#17-最新スナップショットの完了確認と停止前の状態)。直前段落の未作成は引き継ぎ時点。次は停止だけの個別承認と最終対象照合を行い、サイズ変更/起動の許可へ流用しない。
+- 最新のバックアップ完了：ユーザーが手動作成した `snap-<SNAPSHOT_ID>`（元vol-<VOLUME_ID>、11月16日作成、完了/100％、旧snapshot保持）を確認。作成時刻は未提供、復元試験は未実施。20:32 JSTに同じEC2/EBS/公開IP、旧CD休止、旧版HTTPS正常をSSH確認した。[手順書17節](AWS_DEPLOY_RUNBOOK.md#17-最新スナップショットの完了確認と停止前の状態)。直前段落の未作成は引き継ぎ時点。次は停止だけの個別承認と最終対象照合を行い、サイズ変更/起動の許可へ流用しない。
 - 停止承認後：停止だけの承認を受領し20:37 JSTに対象/公開正常を再確認。StopInstances dry-runが権限不足で拒否され、EC2はまだ稼働中。ユーザーのコンソール停止へ引き継ぐ。[手順書18節](AWS_DEPLOY_RUNBOOK.md#18-一時停止承認後の確認とコンソールへの引き継ぎ)。サイズ変更/起動は未承認。実施済みと承認済みを区別する。
 - 停止完了：11月16日20:52 JST頃、ユーザーがコンソールでstoppedを確認したと報告。実停止時刻は未提供。前段の稼働中は過去時点の記録で、次は同じ対象のt3.smallへの変更だけを個別承認する。起動はさらに別承認。[手順書19節](AWS_DEPLOY_RUNBOOK.md#19-停止完了の受領とサイズ変更の承認範囲)。
 - 2GB化/起動の完了：タイプ変更と起動をそれぞれ個別承認後、ユーザーがコンソール実行。21:05〜21:06 JSTに同じEC2のt3.small/総RAM1909MiB、同じEBS20GiB/IP、既存Vinext/HTTPS復旧、再起動後の旧CD inactive/disabledを確認。[手順書20節](AWS_DEPLOY_RUNBOOK.md#20-t3smallへの変更起動後の実測と旧版復旧)。新版DB/負荷/公開は未完了で、この検証をNext.js/MySQLの停止再開試験とはしない。
@@ -274,7 +278,7 @@ EC2停止はインスタンス削除ではない。ボリューム削除、イ�
 
 ### Elastic IP
 
-2026年11月16日、ユーザーがAWSコンソールで現在の公開IP `13.237.188.172` がElastic IPで、対象EC2 `i-04201e271c824ac02` に関連付けられていることを確認したと申告。これを確認済みの計画前提とする。EC2ロールからの参照は引き続き拒否され、エージェントが独立にAPIで確認した結果ではない。
+2026年11月16日、ユーザーがAWSコンソールで現在の公開IP `13.237.188.172` がElastic IPで、対象EC2 `i-<INSTANCE_ID>` に関連付けられていることを確認したと申告。これを確認済みの計画前提とする。EC2ロールからの参照は引き続き拒否され、エージェントが独立にAPIで確認した結果ではない。
 
 Elastic IPを解放/関連付け解除せず維持する。実際の停止・サイズ変更前にも対象と関連付けの維持を確認する。確認目的だけでIAM権限を追加しない。
 

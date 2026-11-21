@@ -1,0 +1,21 @@
+[Unit]
+Description=SiteFlow fixed first Next.js release
+Requires=docker.service siteflow-mysql.service
+After=docker.service siteflow-mysql.service
+RequiresMountsFor=/srv/siteflow-mysql
+BindsTo=srv-siteflow\x2dmysql.mount
+After=srv-siteflow\x2dmysql.mount
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/python3 /usr/local/lib/siteflow/manual-public.py start-app
+ExecStop=/usr/bin/python3 /usr/local/lib/siteflow/manual-public.py stop-app
+TimeoutStartSec=180
+TimeoutStopSec=45
+MemoryMax=128M
+MemorySwapMax=0
+LimitCORE=0
+
+[Install]
+WantedBy=multi-user.target
