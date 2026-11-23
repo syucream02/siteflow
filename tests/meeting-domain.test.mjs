@@ -1,7 +1,39 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { canRunMeeting, parseMeetingAction, parseStartMeetingInput } from '../lib/siteflow/domain.ts';
+import { canRunMeeting, compareMeetingProgress, parseMeetingAction, parseStartMeetingInput } from '../lib/siteflow/domain.ts';
 const entryId = '1bfeb235-081e-4bfc-8ae5-65c93bedbe00';
+
+const value = (progress, status = 'IN_PROGRESS') => ({ progress, status });
+for (const [previous, current, delta] of [[40, 60, 20], [60, 40, -20], [40, 40, 0], [0, 100, 100], [100, 0, -100]]) {
+  test(`会議差分 ${previous}→${current} は${delta}ポイント`, () => {
+    const result = compareMeetingProgress(value(previous), value(current), null, false);
+    assert.equal(result.deltaPoints, delta);
+    assert.equal(result.progressChanged, delta !== 0);
+    assert.equal(result.statusChanged, false);
+  });
+}
+test('前回記録なしを0％とみなさず、状態だけの変更を区別する', () => {
+  assert.equal(compareMeetingProgress(null, value(50), null, false).deltaPoints, null);
+  const result = compareMeetingProgress(value(50), value(50, 'REVIEW'), null, false);
+  assert.equal(result.deltaPoints, 0); assert.equal(result.progressChanged, false); assert.equal(result.statusChanged, true);
+});
+test('会議中の確認後の変更は値か状態で判定し、確認値を変更しない', () => {
+  const confirmed = Object.freeze(value(40));
+  assert.equal(compareMeetingProgress(value(20), value(60), confirmed, false).changedAfterConfirmation, true);
+  assert.equal(compareMeetingProgress(value(20), value(40, 'REVIEW'), confirmed, false).changedAfterConfirmation, true);
+  assert.equal(compareMeetingProgress(value(20), value(40), confirmed, false).changedAfterConfirmation, false);
+  assert.equal(confirmed.progress, 40);
+});
+test('終了済みは確認値との比較を固定し、現在値を混ぜない', () => {
+  const result = compareMeetingProgress(value(20), value(90), value(40), true);
+  assert.equal(result.source, 'confirmation'); assert.equal(result.value.progress, 40);
+  assert.equal(result.deltaPoints, 20); assert.equal(result.changedAfterConfirmation, false);
+});
+test('未確認で終了した案件は当時の値や差分を捏造しない', () => {
+  const result = compareMeetingProgress(value(20), value(90), null, true);
+  assert.equal(result.source, 'unconfirmed'); assert.equal(result.value, null); assert.equal(result.deltaPoints, null);
+  assert.equal(result.progressChanged, false); assert.equal(result.statusChanged, false);
+});
 test('進行役なしなら所属者全員、指定ありなら本人だけ進行可能', () => {
   const member = { userId: 'u', teamId: 't', role: 'member' };
   assert.equal(canRunMeeting('u', 't', member, null), true);

@@ -33,7 +33,7 @@
   <h1>一度に、ひとつ分かればいい。</h1>
   <p class="intro">1回5分、図やコードを1ブロックずつ。図を見る → 実コードを読む → 小さく書く。<br>開発が進んだら、このノートに追記していきます。</p>
   <div class="course-shortcuts" aria-label="実コードを読む4テーマ"><p>初心者向けの実コード教材：この順で、ひとつずつ。</p><button type="button" data-topic="react">① React</button><button type="button" data-topic="typescript">② TypeScript</button><button type="button" data-topic="next">③ Next.js</button><button type="button" data-topic="api">④ API</button></div>
-  <p class="small muted" style="margin-top:12px">現在地：新CDの停止・確定・復旧をローカルで修正。AWS基盤構築は未実施。以前のテーマには開発当時の未実装・未接続の記録も含みます。アプリの最新状態は「まず、全体像」と最新の開発履歴を確認してください。</p>
+  <p class="small muted" style="margin-top:12px">現在地：会議差分のCIテスト追加とREADME整理をローカルで完了。CIの保留差分は反映対象から除外する。Next.jsの初回公開は維持し、今回の機能は本番未反映。新CD/OIDCは保留。以前のテーマには開発当時の未実装・未接続の記録も含みます。アプリの最新状態は「まず、全体像」と最新の開発履歴を確認してください。</p>
   <div class="status" aria-label="アプリの現在地">
     <div><strong><span class="badge">画面</span> 2種類の画面</strong><span class="small muted">/ はメモリ・/workspace はDB接続</span></div>
     <div><strong><span class="badge">DB</span> 専用DBで検証済み</strong><span class="small muted">履歴保持・誤参照など13件成功</span></div>
@@ -60,7 +60,7 @@
 <!-- 更新する場所：headerの現在地と、このJSONのupdated・topics・journal。履歴とテーマIDを保ち、秘密情報は書かない。 -->
 <script id="learning-data" type="application/json">
 {
-  "updated": "2026-11-21",
+  "updated": "2026-11-23",
   "topics": [
     {
   "id": "overview",
@@ -75,7 +75,7 @@
   ],
   "why": "できた部分と、これからつなぐ部分を分けて説明するため。",
   "proof": "2026-11-21 11:58 JSTに公開HTTP試験成功。readiness3回、Cookie、ログイン/保存/再取得/ログアウト、旧セッション401、MySQL healthy、外部WindowsのHTTPSを確認。過去の会議・復元試験記録は各履歴に保持。",
-  "pending": "差分表示・相談事項・決定事項・作業項目・招待/実メール認証は未完成。今回の公開後実ブラウザーUI・EC2再起動・長期ログ運用は未検証。新CD/OIDCは今回の公開条件から外して保留。",
+  "pending": "差分表示は2026-11-22にローカル実装・検証済み、本番未反映。相談事項・決定事項・作業項目・招待/実メール認証は未完成。公開後実ブラウザーUI・EC2再起動・長期ログ運用は未検証。新CD/OIDCは今回の公開条件から外して保留。",
   "question": "/ の画面で指摘を登録したら、MySQLにも保存される？",
   "answer": "/ の指摘管理はメモリデモなのでDBには保存しない。/workspace の新規案件登録は専用MySQLへ保存する。画面による違いを区別する。",
   "pitch": "Next.jsにAPIを統合し、業務処理とDB処理は分離したまま再利用しました。別APIなしでログイン・保存・競合を確認し、保管権限は通常編集より狭くしています。",
@@ -3046,6 +3046,35 @@
       ]
     },
     {
+      "id": "meeting-progress",
+      "title": "会議：前回から何ポイント変わった？",
+      "status": "ローカル実DB・画面検証済み",
+      "diagram": "meeting-progress",
+      "one": "前回40％→現在60％は＋20ポイント。終了した会議の値は、後日の更新と分けて残す。",
+      "points": [
+        "React：画面をデータから組み立てる仕組み。既存のuseState（画面が覚える値）と10秒取得を再利用し、APIの新しい値で再表示する。比較欄はProgressComparisonという小さな部品。選択案件や進行役の入力は上書きしない。",
+        "TypeScript：値の種類を検査する仕組み。前回記録はnull（記録がない）にもなる型。compareMeetingProgressは前回・現在・確認時・終了済みかの4引数（関数へ渡す値）から、増減などの戻り値（計算結果）を返す。元の記録は変更しない。",
+        "Prisma：TypeScriptからDBへアクセスする道具。所属確認後に既存の確認記録を一括取得する。ROW_NUMBERは案件ごとに日時順の番号を付けるSQLで、1番だけ選ぶ。Prisma.sqlの値埋め込みは値とSQL構文を分け、入力を命令として扱わせない。新しいDB列は不要。"
+      ],
+      "why": "案件の変更履歴は「途中の経緯」、会議の確認記録は「共有した時点の値」。役割が違うので確認記録を基準にする。今回の開始前に終了した会議だけから、有効な最後の確認を選ぶ。取消済み・同時進行の会議を除外し、途中で比較元が変わらないようにする。 状態名の表示条件は「表示する時点の値があること」。前回記録は比較に必要なだけで、現在の状態を表示する条件にはしない。Reactの && は条件が真のときだけ右側を表示する書き方なので、条件を何に掛けるかが大切。",
+      "proof": "2026-11-23再検証：本体/API型検査・lint・build、業務55件、HTTP/DB15件、実Chrome会議12項目（状態表示の3項目追加）・従来統合5項目成功。PC1440px/スマホ390pxの画像を確認。前回なし/未確認/確認取消後の現在状態、終了済みの当時状態と現在状態の分離を確認した。",
+      "pending": "本番未反映。大量の過去履歴の性能・全ブラウザー・読み上げは未検証。担当/納期の変更判定、重要業務優先、相談事項、決定事項、招待は今回の範囲外。CD/OIDCは保留。",
+      "question": "前回の記録なし→現在60％なら＋60ポイント？ 終了会議で確認80％の後、現在95％になったら当時の値も95％？",
+      "answer": "どちらも違う。前回なしはnullなので増減は「—」。終了会議は80％を使い、現在95％は別欄。取消済み記録は比較しない。直前会議で未確認なら、さらに前の有効確認を日付付きで使う。",
+      "pitch": "会議確認の保存済みデータを使い、進捗率と状態を別々に比較しました。会議中は現在値、終了後は確認値を使うため、過去の差分が後日の更新で変わりません。DBを増やさず、権限確認と一括取得、記録なしの扱いまで実DBと画面で検証しました。",
+      "exercise": "下の実コードを見て、deltaPointsの右側を自分で書こう。前回60・現在40なら？ 前回なしなら？ 解答：previous && value ? value.progress - previous.progress : null。答えは−20ポイント／表示は「—」。&&は両方あるか、? : は条件で選ぶ記号、.は値の中の項目、-は引き算、nullは記録なし。constは変数の再代入をしない宣言。終了時にconst value = currentへ変えると過去の記録が揺れるので、その違いも説明しよう。 追加の問い：previousがnullでも現在の状態名を見せるには、状態名の表示にpreviousの条件が必要？ 解答：不要。comparison.valueがあれば、その値の状態を表示する。終了済みなら「確認時」、会議中なら「現在」とラベルも変える。",
+      "code": {
+        "file": "lib/siteflow/domain.ts / compareMeetingProgress（実コード）",
+        "text": "export function compareMeetingProgress(\r\n  previous: MeetingProgressValue | null,\r\n  current: MeetingProgressValue,\r\n  confirmation: MeetingProgressValue | null,\r\n  ended: boolean,\r\n) {\r\n  const value = ended ? confirmation : current;\r\n  return {\r\n    source: ended ? (confirmation ? 'confirmation' as const : 'unconfirmed' as const) : 'current' as const,\r\n    value,\r\n    deltaPoints: previous && value ? value.progress - previous.progress : null,\r\n    progressChanged: Boolean(previous && value && previous.progress !== value.progress),\r\n    statusChanged: Boolean(previous && value && previous.status !== value.status),\r\n    changedAfterConfirmation: !ended && Boolean(confirmation &&\r\n      (confirmation.progress !== current.progress || confirmation.status !== current.status)),\r\n  };\r\n}"
+      },
+      "files": [
+        "lib/siteflow/domain.ts",
+        "examples/mysql/meeting-service.ts",
+        "components/siteflow/meeting-workspace.tsx",
+        "docs/MEETING_FLOW.md"
+      ]
+    },
+    {
       "id": "meeting-flow",
       "title": "会議で確認した瞬間を残す",
       "status": "ローカル検証済み・一区切り",
@@ -3602,6 +3631,63 @@
 }
 ],
   "journal": [
+{
+  "date": "2026-11-23",
+  "title": "会議ルールをCIへ追加し、公開状態の説明を整理",
+  "changes": [
+    "Node準備後に会議ルール13件を追加する3行だけをCIの公開候補にする。既存のCD保留差分は維持。",
+    "READMEに会議差分はローカル実装・検証済み、本番未反映と記載。自動デプロイ未導入を維持。",
+    "型検査・lint・build・関連100件と候補CIの構造を再確認。公開候補13ファイルの追加行を点検。"
+  ],
+  "why": "CIは変更を自動検査する仕組み、CDは検査した版を公開環境へ届ける仕組み。テスト追加だけでCDを有効にしない。Gitでは1ファイルに複数の目的の差分が同居できるため、今回はci.ymlの追加3行だけを将来の反映対象にする。",
+  "proof": "本体/API型検査・lint・build・関連100件（会議13件含む）成功。候補YAML解析、既存CI設定保持、失敗無視なし、GHCR/main条件・production後続依存を検査。パッチ適用可否のみ確認、ステージなし。",
+  "limit": "ローカルNode24.20.0での結果。GitHub/Node22での実行は未確認。HTTP/DB15件・Chrome12項目は直前の表示修正時の成功であり、今回再実行していない。保留差分を含むci.yml全体のpushは不可。本番・AWS・Gitへの反映なし。",
+  "topic": "meeting-progress",
+  "files": [
+    "README.md",
+    ".github/workflows/ci.yml",
+    "tests/meeting-domain.test.mjs",
+    "docs/MEETING_FLOW.md"
+  ]
+},
+{
+  "date": "2026-11-23",
+  "title": "記録なし・未確認の案件でも現在の状態名を表示",
+  "changes": [
+    "状態名と状態の比較の表示条件を分離し、初回会議でも現在の状態を表示。",
+    "終了済みは確認時の状態と現在の案件情報を区別し、未確認の過去状態は推測しない。",
+    "Chromeの3ケースを追加して全検証を再実行。CI・README・性能確認は案だけ整理。"
+  ],
+  "why": "前回記録は比較の条件であり、現在の状態を知るための条件ではないため。保存・取消・差分計算を変更せずに、表示漏れだけを直す。",
+  "proof": "2026-11-23再検証：本体/API型検査・lint・build、業務55件、HTTP/DB15件、実Chrome会議12項目（状態表示の3項目追加）・従来統合5項目成功。PC1440px/スマホ390pxの画像を確認。前回なし/未確認/確認取消後の現在状態、終了済みの当時状態と現在状態の分離を確認した。",
+  "limit": "本番未反映。CIとREADMEは未変更。大量履歴のEXPLAIN・索引/負荷測定、全ブラウザー・読み上げは未実施。DB構造・CD/OIDC・本番設定は変更しない。",
+  "topic": "meeting-progress",
+  "files": [
+    "components/siteflow/meeting-workspace.tsx",
+    "examples/mysql/check-meeting-browser.mjs",
+    "docs/MEETING_FLOW.md",
+    "docs/VERIFICATION.md"
+  ]
+},
+{
+  "date": "2026-11-22",
+  "title": "会議の進捗・状態差分を既存記録から表示",
+  "changes": [
+    "前回の有効確認を一括取得し、増減ポイント・状態変更・比較元日時・記録なしを表示。",
+    "会議中の自動更新と確認後の変更表示、終了済みの確認値と現在値の分離を追加。",
+    "DB構造は維持し、実DB/Chromeテストと学習テーマ・図を追加。"
+  ],
+  "why": "何が前回から変わったかを、過去の共有記録を壊さず会議で説明できるようにするため。",
+  "proof": "業務55件（新規9）、会議HTTP/実DB15件（新規4）、実Chrome会議9項目、従来統合5項目成功。1440px/390pxの画像・横はみ出し・自動更新・キーボード・終了後保持を確認。本体/検証API型検査、全体lint、build成功。 DB起動後の初回公開鍵認証と、制限環境のbuild失敗は安全な切り分け後に再試験成功。",
+  "limit": "本番未反映。大量の過去履歴の性能・全ブラウザー・読み上げは未検証。担当/納期の変更判定、重要業務優先、相談事項、決定事項、招待は今回の範囲外。CD/OIDCは保留。 正式DB・AWS・Git・CDへの操作なし。",
+  "topic": "meeting-progress",
+  "files": [
+    "lib/siteflow/domain.ts",
+    "examples/mysql/meeting-service.ts",
+    "components/siteflow/meeting-workspace.tsx",
+    "docs/MEETING_FLOW.md"
+  ]
+},
 {
   "date": "2026-11-21",
   "title": "公開実績の11ファイルをGitHub用に整理",
@@ -6193,6 +6279,10 @@
       var steps=[[["ソースを絞る",".dockerignoreで.envや鍵を除く"],["builderで作る","npm ci → Next.js build"],["runnerへ移す","必要な成果物・USER node"]],[["起動時に設定を渡す","secret・DB・CAをイメージ外から"],["Next.js → MySQL","TLSで発行元と接続先名を照合"],["/api/readyで確認","DBと会議テーブルが読めるか"]],[["名前付きvolume","コンテナを再作成して保存を確認"],["別DBへ復元","バックアップは別の仕組み"],["AWSは次の段階","容量・配信・IP・証明書を承認後に"]]];
       return flow(steps[state].map(function(s){return [s[0],s[1],"good"];}))+note("PC内で使えることと、本番で安全に公開・休止できることを分けて確認する。");
     }
+    if(kind==="meeting-progress"){
+      var variants=[[["前回確認40％","取消されていない記録"],["現在60％","会議中は10秒ごとに取得"],["＋20ポイント","状態変更も別に表示"]],[["前回なし","0％とは別の意味"],["現在60％","初回でも確認はできる"],["増減は—","値を推測しない"]],[["会議では80％で確認","前回40％との差は＋40"],["後日の現在95％","別欄に表示"],["当時80％を保持","過去の差分は変えない"]]];
+      return flow(variants[state].map(function(s){return [s[0],s[1],"good"];}))+note("説明用の図。実アプリはローカル検証済み・本番未反映。確認後に変わった場合は取消→再確認を本人が操作します。");
+    }
     if(kind==="meeting-flow"){
       var steps=[[["会議を開始","通常案件の全体を固定"],["対象は21件","表示中20件だけにしない"],["確認前","まだスナップショットなし"]],[["40％で確認","値・確認者・日時を保存"],["現在は60％","確認時の40％は変えない"],["取消して再確認","旧記録も残し60％を保存"]],[["途中で閉じる","同じ会議をDBから再開"],["終了前に確認","未確認の件数と一覧を見る"],["記録を残して終了","次の会議は確認0件から"]]];
       return flow(steps[state].map(function(s){return [s[0],s[1],"good"];}))+note("ここで一区切り。前回との差分・重要業務優先・決定事項は、次の段階で追加する。");
@@ -6338,7 +6428,7 @@
     return '<div class="two"><div class="card"><div class="count">41件</div><strong>業務ルール</strong><span>状態遷移・入力・期限・元データの保持</span></div><div class="card"><div class="count">13件</div><strong>専用DBの統合検証</strong><span>重複・誤参照・履歴保持・途中失敗</span></div></div>'+note("業務ルール41件と前段階のDB13件。今回：業務41・中継19・実Chrome47シナリオ。API/DB96件は前段階の結果。件数だけで完成とは判断しない。");
   }
   function controls(kind){
-    var labels=kind==="aws-cd-final-audit"?["いまの構成","承認して公開","失敗時に戻す"]:kind==="aws-certificate-audit"?["実物を照合","自動更新","必要時の変更"]:kind==="validation-approval"?["続けてよい","事前承認","必ず停止"]:kind==="aws-s3-restoration"?["保存する","本人が戻す","操作まで確認"]:kind==="local-release-gate"?["承認する","構造を確認","失敗したら"]:kind==="docker-local-release"?["荷物を作る","設定して動かす","保存と復旧"]:kind==="meeting-flow"?["開始する","確認と取消","中断と終了"]:kind==="public-integrated-tls"?["2つの通信","相手を確認","設定が違うと"]:kind==="mysql-backup-restore"?["保存する","戻して確認","まだのこと"]:kind==="next-api-integration"?["統合","権限","未実装"]:kind==="aws-reuse-plan"?["再利用","更新","復旧"]:kind==="workspace-public-preview"?["既定は閉じる","明示して接続","誤設定なら"]:kind==="https-browser-cookies"?["保存と送信","送らない・読めない","削除と再読込"]:kind==="public-proxy"?["2つの入口","Cookieの条件","ログアウト"]:kind==="public-api-startup"?["不正な設定","起動へ渡す","再起動の検証"]:kind==="public-settings"?["検査する","間違っていたら","まだのこと"]:kind==="api-handler-split"?["役割を分ける","既存の動作","次の公開設定"]:kind==="public-demo-plan"?["いまの状態","次の実装","本公開の案"]:kind==="workspace-polish"?["キーボード","取得中に戻る","スマホ"]:kind==="portfolio-story"?["説明の順番","完成の範囲","通し確認"]:kind==="workspace-archive"?["保管する","完了と別","競合したら"]:kind==="workspace-archive-read"?["保管詳細","続き取得","遅い応答"]:kind==="workspace-restore"?["復元する","担当を調整","完了の復元"]:kind==="workspace-status"?["通常の流れ","保留","権限が変わる"]:kind==="workspace-complete"?["進捗が不足","条件がそろう","確認を飛ばす"]:kind==="workspace-reopen"?["理由付き再開","元所属の担当","競合後の判断"]:kind==="workspace-edit"?["差分を保存","競合したら","比較して再保存"]:kind==="workspace-assignees"?["主副を入替","全担当を保持","所属が変わる"]:kind==="workspace-progress"?["40％へ更新","100％にする","完了済み"]:kind==="workspace-create"?["登録の流れ","候補の続き","所属が変わる"]:kind==="workspace-save-failure"?["二重クリック","保存結果が不明","保存に成功"]:kind==="workspace-detail"?["詳細を開く","一覧へ戻る","チーム変更"]:kind==="workspace-related"?["必要時に取得","追加取得に失敗","名前の違い"]:kind==="workspace-login"?["成功","失敗","ログアウト"]:kind==="workspace-teams"?["選択","遅い通信","ログイン切れ"]:kind==="workspace-states"?["待つ・0件","通信失敗","続き取得"]:kind==="project-archive"?["保管する","保管中の編集","編集と競合"]:kind==="archive-read"?["一覧を分ける","他チーム","0件"]:kind==="project-restore"?["そのまま復元","担当を調整","最後で失敗"]:kind==="project-status"?["通常の流れ","保留","差し戻し"]:kind==="project-complete"?["進捗が不足","条件がそろう","確認を飛ばす"]:kind==="project-reopen"?["理由付き再開","元所属の担当","履歴で失敗"]:kind==="progress-update"?["100％にする","進捗を修正","完了済み"]:kind==="progress-write-history"?["履歴を保存","同じ値を再送","メモだけ"]:kind==="progress-atomic"?["最後で失敗","3つの保存が競合","所属なし"]:kind==="assignees-change"?["主副を入替","重複した担当","古い候補"]:kind==="assignees-diff"?["差分だけ保存","並び替え","名前の変更"]:kind==="assignees-atomic"?["最後で失敗","編集との競合","自分を外す"]:kind==="project-edit"?["名前だけ変更","備考を消す","余分な項目"]:kind==="project-edit-access"?["作成者だけ","編集を許可","所属なし"]:kind==="project-version"?["2人が保存","競合後の対応","途中で失敗"]:kind==="assignee-candidates"?["候補と保存","古い候補","本人が未所属"]:kind==="project-create"?["登録","重複した担当","登録後"]:kind==="project-atomic"?["成功","最後で失敗","同時に所属削除"]:kind==="team-create"?["作成","余分な属性","未ログイン"]:kind==="team-transaction"?["両方成功","所属保存に失敗","メール未認証"]:kind==="my-teams"?["自分の一覧","所属0件","続き"]:kind==="assignment-history"?["主担当の交代","副担当の追加","副担当の解除"]:kind==="progress-history"?["変更の記録","名前を変えると？","履歴0件"]:kind==="support-members"?["現在も所属","所属なしの記録","副担当0人"]:kind==="project-detail"?["自チームの案件","別チームのID","アーカイブ"]:kind==="project-list"?["先頭20件","続き3件","0件"]:kind==="team-access"?["未ログイン","所属あり","所属なし"]:kind==="overview"?["メモリデモ","DB接続版","次の作業"]:kind==="membership"?["所属中","所属を外す","再参加"]:kind==="integrity"?["重複する所属","別チームの担当","途中で保存失敗"]:null;
+    var labels=kind==="meeting-progress"?["差分を計算","記録がないとき","過去を保持"]:kind==="aws-cd-final-audit"?["いまの構成","承認して公開","失敗時に戻す"]:kind==="aws-certificate-audit"?["実物を照合","自動更新","必要時の変更"]:kind==="validation-approval"?["続けてよい","事前承認","必ず停止"]:kind==="aws-s3-restoration"?["保存する","本人が戻す","操作まで確認"]:kind==="local-release-gate"?["承認する","構造を確認","失敗したら"]:kind==="docker-local-release"?["荷物を作る","設定して動かす","保存と復旧"]:kind==="meeting-flow"?["開始する","確認と取消","中断と終了"]:kind==="public-integrated-tls"?["2つの通信","相手を確認","設定が違うと"]:kind==="mysql-backup-restore"?["保存する","戻して確認","まだのこと"]:kind==="next-api-integration"?["統合","権限","未実装"]:kind==="aws-reuse-plan"?["再利用","更新","復旧"]:kind==="workspace-public-preview"?["既定は閉じる","明示して接続","誤設定なら"]:kind==="https-browser-cookies"?["保存と送信","送らない・読めない","削除と再読込"]:kind==="public-proxy"?["2つの入口","Cookieの条件","ログアウト"]:kind==="public-api-startup"?["不正な設定","起動へ渡す","再起動の検証"]:kind==="public-settings"?["検査する","間違っていたら","まだのこと"]:kind==="api-handler-split"?["役割を分ける","既存の動作","次の公開設定"]:kind==="public-demo-plan"?["いまの状態","次の実装","本公開の案"]:kind==="workspace-polish"?["キーボード","取得中に戻る","スマホ"]:kind==="portfolio-story"?["説明の順番","完成の範囲","通し確認"]:kind==="workspace-archive"?["保管する","完了と別","競合したら"]:kind==="workspace-archive-read"?["保管詳細","続き取得","遅い応答"]:kind==="workspace-restore"?["復元する","担当を調整","完了の復元"]:kind==="workspace-status"?["通常の流れ","保留","権限が変わる"]:kind==="workspace-complete"?["進捗が不足","条件がそろう","確認を飛ばす"]:kind==="workspace-reopen"?["理由付き再開","元所属の担当","競合後の判断"]:kind==="workspace-edit"?["差分を保存","競合したら","比較して再保存"]:kind==="workspace-assignees"?["主副を入替","全担当を保持","所属が変わる"]:kind==="workspace-progress"?["40％へ更新","100％にする","完了済み"]:kind==="workspace-create"?["登録の流れ","候補の続き","所属が変わる"]:kind==="workspace-save-failure"?["二重クリック","保存結果が不明","保存に成功"]:kind==="workspace-detail"?["詳細を開く","一覧へ戻る","チーム変更"]:kind==="workspace-related"?["必要時に取得","追加取得に失敗","名前の違い"]:kind==="workspace-login"?["成功","失敗","ログアウト"]:kind==="workspace-teams"?["選択","遅い通信","ログイン切れ"]:kind==="workspace-states"?["待つ・0件","通信失敗","続き取得"]:kind==="project-archive"?["保管する","保管中の編集","編集と競合"]:kind==="archive-read"?["一覧を分ける","他チーム","0件"]:kind==="project-restore"?["そのまま復元","担当を調整","最後で失敗"]:kind==="project-status"?["通常の流れ","保留","差し戻し"]:kind==="project-complete"?["進捗が不足","条件がそろう","確認を飛ばす"]:kind==="project-reopen"?["理由付き再開","元所属の担当","履歴で失敗"]:kind==="progress-update"?["100％にする","進捗を修正","完了済み"]:kind==="progress-write-history"?["履歴を保存","同じ値を再送","メモだけ"]:kind==="progress-atomic"?["最後で失敗","3つの保存が競合","所属なし"]:kind==="assignees-change"?["主副を入替","重複した担当","古い候補"]:kind==="assignees-diff"?["差分だけ保存","並び替え","名前の変更"]:kind==="assignees-atomic"?["最後で失敗","編集との競合","自分を外す"]:kind==="project-edit"?["名前だけ変更","備考を消す","余分な項目"]:kind==="project-edit-access"?["作成者だけ","編集を許可","所属なし"]:kind==="project-version"?["2人が保存","競合後の対応","途中で失敗"]:kind==="assignee-candidates"?["候補と保存","古い候補","本人が未所属"]:kind==="project-create"?["登録","重複した担当","登録後"]:kind==="project-atomic"?["成功","最後で失敗","同時に所属削除"]:kind==="team-create"?["作成","余分な属性","未ログイン"]:kind==="team-transaction"?["両方成功","所属保存に失敗","メール未認証"]:kind==="my-teams"?["自分の一覧","所属0件","続き"]:kind==="assignment-history"?["主担当の交代","副担当の追加","副担当の解除"]:kind==="progress-history"?["変更の記録","名前を変えると？","履歴0件"]:kind==="support-members"?["現在も所属","所属なしの記録","副担当0人"]:kind==="project-detail"?["自チームの案件","別チームのID","アーカイブ"]:kind==="project-list"?["先頭20件","続き3件","0件"]:kind==="team-access"?["未ログイン","所属あり","所属なし"]:kind==="overview"?["メモリデモ","DB接続版","次の作業"]:kind==="membership"?["所属中","所属を外す","再参加"]:kind==="integrity"?["重複する所属","別チームの担当","途中で保存失敗"]:null;
     return labels?'<div class="switches" role="group" aria-label="図の状態">'+labels.map(function(label,i){return '<button type="button" data-choice="'+i+'" aria-pressed="'+(i===choice)+'">'+label+'</button>';}).join("")+'</div>':"";
   }
   function sourceLinks(s){

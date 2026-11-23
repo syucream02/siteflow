@@ -1,5 +1,122 @@
 # 会議の開始・確認・再開・終了
 
+## GitHub反映前のCI・README整理（2026-11-23・ローカルのみ）
+
+会議ルール13件を既存Node準備後に実行するステップを `ci.yml` へ追加。HTTP/DB・Chrome試験はCIへ追加していない。READMEでは会議差分を「ローカル実装・検証済み、本番未反映」と明記し、実装範囲・未完成機能・公開確認済みの操作を区別した。自動デプロイ未導入の説明は維持。
+
+**CIには、以前から保留中のCD/OIDC差分が同居する。ファイル全体をステージ・pushしてはいけない。** 今回の公開候補はGit管理済みHEADのCIに会議テストの3行だけを追加した内容。既存の起動条件・権限・GHCR保存・productionの承認付き後続ジョブは変更しない。新CDのAction固定や新しい配信記録などの保留差分は今回の対象外。
+
+確認用にGit除外の `work/meeting-ci-candidate.yml`（今回分だけの候補）と `work/meeting-ci-only.patch`（追加3行だけのパッチ）を生成した。YAMLを解析し、追加ステップを除く構造がHEADと同じ、DB/Chrome不要、失敗無視なし、後続のneeds維持、GHCRはmain pushのみ、保留中の未確定Action SHAなしを検査した。作業ツリーも、今回の3行を除くと作業前のCI内容と一致する。`git apply --check --cached` で候補パッチの適用可能性だけを確認し、実際の適用・ステージはしていない。
+
+`node --experimental-strip-types --test tests/meeting-domain.test.mjs` のnodeは実行環境、strip-typesは型注釈の読み飛ばし、testは会議ルール13件の実行。ファイル/DBを変更せず、実行失敗を無視する設定を付けない。GitHub Actionsは通常の成功条件と `needs: docker-build` により、失敗時に後続のGHCR保存・承認記録へ進めない。後片付け/失敗ログ用の既存ステップはそのまま動く。仕様根拠：[状態確認の既定条件](https://docs.github.com/en/actions/reference/workflows-and-actions/expressions#status-check-functions)、[ジョブ依存](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idneeds)。GitHubでの実Actions実行・障害試験は今回未実施。
+
+今回の再検証：本体/API型検査・全体lint・build・業務/会議/API中継の関連100件が成功。100件は業務42件・会議ルール13件・その他45件を含む。ローカルNodeは24.20.0で、GitHub側のNode22による実行はまだ未確認。HTTP/DB15件・Chrome12項目の成功は直前の状態表示修正時の結果であり、今回繰り返していない。アプリコードとDB定義はその検証時から変更なし。
+
+反映候補は会議機能の11ファイル＋README＋CI追加部分の計13ファイル。`ci.yml` が保留分と重複するため、ファイル数の単純加算で全差分数を判断しない。既存の新CD38ファイル分の差分・対象外4ファイルは保持し、CIの追加以外を今回取り込まない。追加行の秘密値/個人PCパス点検は該当なし。過去の検証資料2件に既存リソースID、ブラウザーテストに既存Chrome固定パスが残る。リソースIDは認証情報ではないが、匿名化の要否は公開範囲として引き続き区別する。
+
+Git commit/push/PR/マージ、Actions実行、本番接続/配信、AWS設定、DBマイグレーションはしていない。保留中ワークフロー全体の実行可否を、この候補チェックの成功で保証したとは扱わない。
+
+## 修正：記録なし・未確認でも状態名を表示（2026-11-23）
+
+ローカルのみ。`meeting-workspace.tsx` の状態表示を「比較元がある場合」に限定していたため、前回記録なし・今回未確認の案件で現在の状態が消えていた。`comparison.value`（表示する時点の値）があれば状態名を表示し、前回との差の表示だけに `previous`（比較元）の条件を残した。
+
+- 進行中は「現在の状態」、終了済みは「この会議の確認時の状態」と明示する。終了後の現在情報は既存の別欄を維持する。
+- 記録なしの増減は引き続き「—」。終了時未確認の当時値・状態は推測しない。差分計算・SQL・状態変更判定・確認取消処理・DB構造は変更していない。
+- 変更した実装は `components/siteflow/meeting-workspace.tsx` と `examples/mysql/check-meeting-browser.mjs`。学習・検証記録は本書、`VERIFICATION.md`、`LEARNING_GUIDE.html` に追記する。
+
+再検証：本体/API型検査・lint・build、業務55件、HTTP/DB15件、実Chrome会議12項目（表示漏れの3項目追加）・従来Next.js統合5項目すべて成功。実DBの既存記録を使用し、1440/390pxの表示・横はみ出し・確認取消・再確認・会議終了後の分離も確認。画像はGit除外の `work/meeting-browser/meeting-no-previous-390.png` と `meeting-history-390.png`。テスト用データと一時Next.js/Chromeは回収済み。本番反映・全ブラウザー・大量履歴の性能は未検証。
+
+### 調査案：会議専用テストをCIへ追加する最小変更（未適用）
+
+Git管理済みHEADのCIではNode.js 22を準備しているが、Dockerのrunnerには `tests/domain.test.mjs` だけをコピーしている。会議ルールを追加する最小案は、**ホスト側のNode準備後に1ステップ追加**する方法。Dockerfileや配信処理は変更しない。
+
+```yaml
+# 設定案。今回ワークフローへ反映していない。
+- name: Test meeting domain rules
+  run: node --experimental-strip-types --test tests/meeting-domain.test.mjs
+```
+
+`node` はJavaScript実行環境、`--experimental-strip-types` はTypeScriptの型注釈を読み飛ばす指定、`--test` は指定した13件の会議ルールテストを実行する指定。DB・秘密情報・ネットワークは不要で、ファイルやデータを変更しない。失敗すればCIを止められるが、HTTP/DB15件やChrome12項目の実行を代替しない。
+
+HTTP/DBまでCI化する場合は、一時MySQL・検証専用設定・検証DBへのスキーマ準備を別途設計する必要がある。本番の秘密情報を流用しない。現在の `meeting-check.test.mjs` は明示フラグなしではskipされるため、コマンドだけ追加して合格扱いにしない。今回、CI・Dockerfile・CD保留ファイルは変更していない。
+
+### 調査案：READMEの修正文（未適用）
+
+「今後の範囲」の差分表示未完成の箇所を次の2項目へ分ける案。
+
+> 会議の進捗差分はローカルで実装・検証済み（本番未反映）。前回の有効な確認記録との比較、ポイント増減、状態変更、確認後の変更、終了済み記録の保持に対応。
+>
+> 重要業務優先・相談事項、決定事項/引き継ぎ、写真・報告書、検索・全体集計は未完成。
+
+READMEは今回変更していない。
+
+### 調査案：大量履歴の取得件数・実行計画・索引（未測定）
+
+現在の比較元取得は対象案件をIN条件で限定し、案件ごとにROW_NUMBERの先頭1件だけ返すため、返却は会議対象の最大500件。ただし過去の会議数・確認/取消記録数には上限がなく、DB内部の走査・並べ替え件数は500件に限定されない。10秒取得は会議の読み取りトランザクション内で動くため、遅い取得が確認操作の待ち時間へ影響する可能性も確認する。
+
+検証専用DBだけで、次の順に確認する。今回は方法の整理のみで、大量データ投入・実行計画取得・索引変更は実施していない。
+
+1. `SELECT DATABASE();` で接続先を検証設定と照合してから、件数を数える。これは現在のDB名を読むだけで、外部へ転記しない。
+2. 下記COUNTは確認履歴の実件数を返す。大規模時は読み取り負荷がある。チーム別/対象案件別にもアプリと同じパラメーターで絞り、返却件数と走査候補件数を区別する。
+3. SHOW INDEXで実DBの索引と列順を読み、設計ファイルと一致するか確認する。FROMは対象テーブル。索引を作る操作ではない。
+4. `meeting-service.ts` と同じ比較元SELECTに `EXPLAIN FORMAT=JSON` を付け、選ばれた索引・結合順・推定走査件数・一時表・並べ替えを見る。FORMAT=JSONは結果の表示形式。
+5. その後、PC内の隔離データで `EXPLAIN ANALYZE FORMAT=TREE` を付けて実行時間・実走査件数・繰り返し回数を測る。ANALYZEはSELECTを実際に実行するので負荷がある。大量実行は一度に行わず、1千→1万→5万確認記録へ段階的に増やす計画とする。各段階で対象1/100/500案件、同時進行/取消/記録なしを含めて確認し、テストデータだけを回収する。
+
+```sql
+-- 実行方法の案。接続先が検証専用DBだと確定した後だけ使用する。
+SELECT COUNT(*) AS meetingCount FROM Meeting;
+SELECT COUNT(*) AS confirmationCount FROM MeetingConfirmation;
+SELECT COUNT(*) AS validConfirmationCount FROM MeetingConfirmation WHERE revokedAt IS NULL;
+SHOW INDEX FROM Meeting;
+SHOW INDEX FROM MeetingProject;
+SHOW INDEX FROM MeetingConfirmation;
+```
+
+ソース上の既存索引は `Meeting(teamId, startedAt, id)`、`MeetingProject(teamId, projectId)`、`MeetingConfirmation(teamId, entryId, confirmedAt, id)` と各主キー/一意制約。endedAt・revokedAtの絞り込み、ROW_NUMBERのソートで実際にどう使われるかは実行計画で確認する。返却が少ないことだけを高速性の根拠にせず、必要性を測ってから索引追加やSQL変更を提案する。今回は実DB索引の再点検や性能目標達成を実施済みと扱わない。
+
+公式仕様：[MySQL 8.4 EXPLAIN / EXPLAIN ANALYZE](https://dev.mysql.com/doc/refman/8.4/en/explain.html)、[SHOW INDEX](https://dev.mysql.com/doc/refman/8.4/en/show-index.html)。EXPLAIN ANALYZEが実行を伴うこと、SHOW INDEXのCardinalityは正確な件数ではなく推定であることに注意する。
+
+## 追加：前回確認からの進捗・状態差分（2026-11-22）
+
+ローカル実装・実DB/Chrome検証済み。本番への反映はしていない。以下の過去節で「差分未実装」とする記述は、2026-11-15時点の記録として保持する。
+
+- 比較元は、今回の会議開始より**前に終了**した同じチーム・案件の会議にある、有効な最終確認。直前会議が未確認ならさらに前へ戻る。取消済み・進行中・今回開始後に終了した会議を除外する。確認日時降順、同時刻は確認ID降順で決定する。
+- 進行中は前回確認と現在値を比較。40％→60％は「＋20ポイント」、減少は「−」、同値は「±0ポイント」。進捗変更と状態変更を区別し、前回確認日時をJSTで表示する。0％も有効な記録で、記録なしを0％へ置換しない。
+- 既存10秒取得と手動更新を再利用。確認後に進捗または状態が変われば「確認後に変更あり」。確認記録や確認済みフラグを自動変更せず、取消→再確認は本人操作のまま。
+- 終了済みは前回確認→その会議の確認値を主表示に固定。後日の現在値は別欄。未確認で終了した案件の当時値・差分は推測しない。以前の取消記録・確認記録は更新/削除しない。
+- 「変更」は進捗または状態の**値の違い**。担当・納期・案件名・途中で変わって元に戻った経緯は対象外。既存の進捗履歴を会議確認の代用にはしない。
+
+### 読み取りAPIの追加項目
+
+既存 `GET /api/siteflow/teams/:teamId/meetings/:meetingId` の各 `entries` に `previousConfirmation`（会議ID・確認日時・進捗・状態、なければnull）と `comparison` を追加。`comparison` は比較対象の `value`、対象が現在/確認時/未確認のどれかを表す `source`、`deltaPoints`、`progressChanged`、`statusChanged`、`changedAfterConfirmation` を返す。既存のcounts・書き込みAPI・権限は維持する。
+
+`comparisonCounts` は全対象から算出した差分あり・前回記録なし・終了時未確認の件数。記録なしと未確認は別の意味であり、足して総件数になる分類ではない。
+
+### 設計・変更ファイル
+
+| 対象 | 目的 |
+| --- | --- |
+| `lib/siteflow/domain.ts` | `compareMeetingProgress` で現在値と確認値を使い分け、元の値を変更せず計算 |
+| `examples/mysql/meeting-service.ts` | 所属確認後、Prismaのパラメーター付きSQLで比較元を一括取得。ROW_NUMBERで案件別の先頭1件を選ぶ |
+| `components/siteflow/meeting-workspace.tsx` | 比較欄・バッジ・全対象の差分件数・確認後の変更表示 |
+| `components/siteflow/connected-workspace.module.css` | 既存の緑とカードを再利用。PC3列、650px以下は縦配置。色だけで増減を伝えない |
+| `tests/meeting-domain.test.mjs` / `tests/meeting-check.test.mjs` | 業務計算・実DBの比較元選択・履歴保持・権限を検証 |
+| `examples/mysql/check-meeting-browser.mjs` | 実DBを使った会議差分・自動更新・終了後保持の画面検証を既存試験へ追加 |
+
+既存16テーブルと索引を使用。DB定義・マイグレーション・依存・CI/CD・AWSの変更なし。案件ごとに問い合わせを増やさず、比較元は1回のSELECTで最大対象件数分だけ返す。ただし、大量の過去履歴に対する性能目標の達成や実行計画は未検証であり、高速性を保証したとは扱わない。
+
+### 今回の結果と実行上の注意
+
+業務55件（新規9件）、会議HTTP/DB15件（新規4件）、実Chrome会議9項目、従来Next.js統合5項目が成功。本体/検証APIの型検査・全体lint・buildも成功。PC1440px/スマホ390pxの画像を目視し、横はみ出しなし。Escape・Tab/Enterによる終了操作、通信失敗時の表示保持、チーム切替も確認した。結果/画像はGit除外の `work/meeting-browser/` と `work/integrated-next/` に保存。
+
+ローカルMySQLが停止していたため既存コンテナだけ起動。初回は認証用公開鍵が必要で準備がタイムアウトし15件未実行。公開鍵自動取得を許可せず、対象コンテナから**公開鍵のみ**を読み取りメモリで明示して検証ユーザーを認証した後、通常の既存テストを再実行して15件成功。秘密鍵取得・パスワード出力・接続設定/権限変更・DB初期化はしていない。
+
+ビルドは制限環境で既存の保護フォルダー列挙に失敗したが、通常実行環境で成功。保護設定を緩めず、既存の未コミット型キャッシュを保持した。
+
+本番反映、全ブラウザー/読み上げ、大量履歴での性能は未検証。重要業務優先・相談事項・決定事項・作業項目・招待は今回の範囲外。
+
+学習ガイドは既存85テーマID・127履歴を保持し、差分テーマ1件・履歴1件を追加（計86/128）。新テーマの図3状態、1440/390pxで横はみ出しなし、外部HTTP遮断・JavaScript例外0を実Chromeで確認。保留中42ファイルはSHA-256が作業前と一致。ローカルMySQLは検証終了後に正常停止し、作業前の停止状態へ戻した（ボリューム/コンテナ削除なし）。
+
 2026-11-15。今回の区切りは、ローカル接続版 `/workspace` で「会議を一通り進め、確認記録をDBへ残せる」こと。
 確定要件の全業務確認を実装する最初の段階。重要業務優先・前回との差分・決定事項・招待が完成したという意味ではない。
 
