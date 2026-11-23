@@ -248,6 +248,29 @@ export function isUuid(value: string): boolean {
 
 export const meetingProjectLimit = 500;
 
+type MeetingProgressValue = { progress: number; status: ProjectStatus };
+
+// 会議の確認値は履歴。終了後は現在の案件値で過去の比較を書き換えない。
+export function compareMeetingProgress(
+  previous: MeetingProgressValue | null,
+  current: MeetingProgressValue,
+  confirmation: MeetingProgressValue | null,
+  ended: boolean,
+) {
+  const value = ended ? confirmation : current;
+  return {
+    source: ended ? (confirmation ? 'confirmation' as const : 'unconfirmed' as const) : 'current' as const,
+    value,
+    deltaPoints: previous && value ? value.progress - previous.progress : null,
+    progressChanged: Boolean(previous && value && previous.progress !== value.progress),
+    statusChanged: Boolean(previous && value && previous.status !== value.status),
+    changedAfterConfirmation: !ended && Boolean(confirmation &&
+      (confirmation.progress !== current.progress || confirmation.status !== current.status)),
+  };
+}
+
+export type MeetingProgressComparison = ReturnType<typeof compareMeetingProgress>;
+
 // 進行役ありの場合、管理者にも進行権限を自動で追加しない。
 export function canRunMeeting(userId: string, teamId: string, membership: CurrentTeamMembership | null, facilitatorUserId: string | null): boolean {
   return canReadTeam(userId, teamId, membership) && (facilitatorUserId === null || facilitatorUserId === userId);

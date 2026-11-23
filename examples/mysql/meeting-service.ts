@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient } from './generated/integrated/client.ts';
-import { canReadTeam, canRunMeeting, meetingProjectLimit, type MeetingAction } from '../../lib/siteflow/domain.ts';
+import { canReadTeam, canRunMeeting, compareMeetingProgress, meetingProjectLimit, type MeetingAction, type ProjectStatus } from '../../lib/siteflow/domain.ts';
 
 const denied = () => ({ ok: false as const, status: 403, code: 'MEETING_ACCESS_DENIED', message: 'この会議を操作する権限がありません。所属と進行役を確認してください。' });
 const missing = () => ({ ok: false as const, status: 404, code: 'MEETING_NOT_FOUND', message: '会議が見つかりません。' });
@@ -56,15 +56,42 @@ export async function readMeetingForUser(prisma: PrismaClient, userId: string, t
       } },
     } });
     if (!meeting) return missing();
+    // 今回の開始前に終了した会議だけ。同時進行の会議や取消済みの記録を混ぜない。
+    // 全対象を1回で取得し、案件ごとの問い合わせ（N+1）と過去全行の転送を避ける。
+    const previousRows = meeting.projects.length ? await tx.$queryRaw<{
+      projectId: string; meetingId: string; confirmedAt: Date; progress: number; status: ProjectStatus;
+    }[]>(Prisma.sql`
+      SELECT projectId, meetingId, confirmedAt, progress, status FROM (
+        SELECT mp.projectId, mp.meetingId, c.confirmedAt, c.progress, c.status,
+          ROW_NUMBER() OVER (PARTITION BY mp.projectId ORDER BY c.confirmedAt DESC, c.id DESC) AS recordRank
+        FROM MeetingConfirmation c
+        INNER JOIN MeetingProject mp ON mp.teamId=c.teamId AND mp.id=c.entryId
+        INNER JOIN Meeting m ON m.teamId=mp.teamId AND m.id=mp.meetingId
+        WHERE c.teamId=${teamId} AND mp.teamId=${teamId} AND m.teamId=${teamId}
+          AND c.revokedAt IS NULL AND m.endedAt < ${meeting.startedAt}
+          AND c.confirmedAt < ${meeting.startedAt} AND m.id <> ${meetingId}
+          AND mp.projectId IN (${Prisma.join(meeting.projects.map(entry => entry.projectId))})
+      ) ranked WHERE recordRank=1
+    `) : [];
+    const previousByProject = new Map(previousRows.map(({ projectId, ...record }) => [projectId, record]));
     const entries = meeting.projects.map(entry => ({ id: entry.id, projectId: entry.projectId, nameAtStart: entry.nameSnapshot,
       project: { name: entry.project.name, dueDate: entry.project.dueDate.toISOString().slice(0, 10), progress: entry.project.progress,
         status: entry.project.status, archived: entry.project.archivedAt !== null, primaryName: entry.project.primaryParticipant.user.name },
-      confirmation: entry.confirmations[0] ?? null, auditCount: entry._count.confirmations }));
+      confirmation: entry.confirmations[0] ?? null, auditCount: entry._count.confirmations,
+      previousConfirmation: previousByProject.get(entry.projectId) ?? null,
+      comparison: compareMeetingProgress(previousByProject.get(entry.projectId) ?? null, entry.project,
+        entry.confirmations[0] ?? null, meeting.endedAt !== null),
+    }));
     const confirmed = entries.filter(entry => entry.confirmation !== null).length;
     return { ok: true as const, meeting: { id: meeting.id, version: meeting.version, startedAt: meeting.startedAt, endedAt: meeting.endedAt,
       facilitator: meeting.facilitator ? { userId: meeting.facilitator.userId, name: meeting.facilitator.user.name } : null,
       canOperate: !meeting.endedAt && canRunMeeting(userId, teamId, membership, meeting.facilitator?.userId ?? null),
-      counts: { total: entries.length, confirmed, unconfirmed: entries.length - confirmed }, entries } };
+      counts: { total: entries.length, confirmed, unconfirmed: entries.length - confirmed },
+      comparisonCounts: {
+        changed: entries.filter(entry => entry.comparison.progressChanged || entry.comparison.statusChanged).length,
+        noPrevious: entries.filter(entry => !entry.previousConfirmation).length,
+        unconfirmed: entries.filter(entry => entry.comparison.source === 'unconfirmed').length,
+      }, entries } };
   });
 }
 

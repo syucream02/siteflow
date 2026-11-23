@@ -56,12 +56,35 @@ try {
   await waitFor("!!document.getElementById('team-select')", 'teams');
   await select('#team-select', data.teamIds[0]); await click('会議');
   await waitFor(bodyHas('会議はまだありません。'), 'empty');
+  // ローカル専用fixture。比較元を明示し、進行中/終了後の表示を実DBで確かめる。
+  const person = await prisma.teamParticipant.findUniqueOrThrow({ where: { teamId_userId: { teamId: data.teamIds[0], userId: data.userId } } });
+  const pastStart = new Date(Date.now() - 172800000), pastEnd = new Date(Date.now() - 86400000);
+  const previous = await prisma.meeting.create({ data: { teamId: data.teamIds[0], createdByParticipantId: person.id, startedAt: pastStart, endedAt: pastEnd } });
+  const previousEntry = await prisma.meetingProject.create({ data: { teamId: data.teamIds[0], meetingId: previous.id, projectId: data.projectIds[0], position: 0, nameSnapshot: '架空の案件 01' } });
+  await prisma.meetingConfirmation.create({ data: { teamId: data.teamIds[0], entryId: previousEntry.id, progress: 40, status: 'IN_PROGRESS', projectVersion: 1,
+    confirmedAt: pastStart, confirmedByParticipantId: person.id, confirmedByNameSnapshot: '過去の架空確認者' } });
+  await prisma.project.update({ where: { id: data.projectIds[0] }, data: { progress: 60, status: 'REVIEW', version: { increment: 1 } } });
   await click('新しい会議を開始'); await waitFor(bodyHas('全21件 · 確認済み0件 · 未確認21件'), 'targets');
   assert.equal(await evaluate("document.querySelectorAll('#meeting-entry option').length"), 21);
-  let meeting = await prisma.meeting.findFirstOrThrow({ where: { teamId: data.teamIds[0] } });
+  let meeting = await prisma.meeting.findFirstOrThrow({ where: { teamId: data.teamIds[0], endedAt: null } });
   const entries = await prisma.meetingProject.findMany({ where: { meetingId: meeting.id }, orderBy: { position: 'asc' } });
   await screenshot('meeting-1440'); await fit();
   checks.push('開始時に次ページも含む21案件を表示、確認記録は0件');
+  await waitFor(bodyHas('＋20ポイント'), 'delta');
+  assert.equal(await evaluate(bodyHas('進捗変更・状態変更')), true);
+  assert.equal(await evaluate(bodyHas('比較元：')), true);
+  await select('#meeting-entry', entries[1].id); await waitFor(bodyHas('前回の確認記録なし'), 'no-previous');
+  assert.equal(await evaluate("[...document.querySelectorAll('[aria-label=\"前回確認からの差分\"] dd')].at(-1).textContent"), '—');
+  assert.equal(await evaluate(bodyHas('現在の状態：未着手')), true);
+  assert.equal(await evaluate(bodyHas('この会議では未確認です。')), true);
+  await width(390); await fit(); await screenshot('meeting-no-previous-390'); await width(1440);
+  checks.push('前回記録なし・今回未確認でも現在の状態を表示、増減は—、スマホ幅も維持');
+  await select('#meeting-entry', entries[0].id);
+  assert.equal(await evaluate(bodyHas('現在の状態：確認待ち')), true);
+  assert.equal(await evaluate(bodyHas('状態の比較：進行中 → 確認待ち')), true);
+  assert.equal(await evaluate(bodyHas('この会議では未確認です。')), true);
+  checks.push('前回記録あり・今回未確認でも現在状態と状態の比較を両方表示');
+  checks.push('前回40％→現在60％を＋20ポイント、進捗/状態変更・比較元日時、記録なしを表示');
 
   phase = 'confirm-resume';
   await click('確認済みにして次へ'); await waitFor(bodyHas('確認済み1件'), 'confirmed');
@@ -77,18 +100,21 @@ try {
   phase = 'snapshot-poll';
   await select('#meeting-entry', entries[0].id);
   await select('#change-facilitator', '');
-  await prisma.project.update({ where: { id: entries[0].projectId }, data: { progress: 47, version: { increment: 1 } } });
-  await waitFor(bodyHas('47％'), 'polling');
-  assert.equal(await evaluate(bodyHas('確認時：0％')), true);
+  await prisma.project.update({ where: { id: entries[0].projectId }, data: { progress: 80, version: { increment: 1 } } });
+  await waitFor(bodyHas('80％'), 'polling');
+  assert.equal(await evaluate(bodyHas('確認時：60％')), true);
+  assert.equal(await evaluate(bodyHas('確認後に変更あり')), true);
+  assert.equal(await evaluate(bodyHas('＋40ポイント')), true);
   assert.equal(await evaluate("document.getElementById('meeting-entry').value"), entries[0].id);
   assert.equal(await evaluate("document.getElementById('change-facilitator').value"), '');
   checks.push('10秒ポーリングで現在値だけ更新し、確認時の値・選択案件・進行役入力を保持');
   await click('確認を取り消す'); await waitFor(bodyHas('確認済み0件'), 'unconfirm');
+  assert.equal(await evaluate(bodyHas('現在の状態：確認待ち')), true);
   await click('確認済みにして次へ'); await waitFor(bodyHas('確認済み1件'), 'reconfirm');
   const records = await prisma.meetingConfirmation.findMany({ where: { entryId: entries[0].id } });
   assert.equal(records.length, 2); assert.equal(records.filter(record => record.revokedAt).length, 1);
-  assert.equal(records.find(record => !record.revokedAt).progress, 47);
-  checks.push('取消履歴を保持し、再確認時は最新47％を新しく保存');
+  assert.equal(records.find(record => !record.revokedAt).progress, 80);
+  checks.push('取消履歴を保持し、再確認時は最新80％を新しく保存');
 
   phase = 'failures-conflict';
   failSave = true; await click('確認済みにして次へ'); await waitFor(bodyHas('検証用の通信失敗'), 'save-fail');
@@ -116,6 +142,23 @@ try {
   await key('Enter', 'Enter', 13); await waitFor(bodyHas('終了した会議'), 'ended');
   assert.equal(await evaluate("[...document.querySelectorAll('button')].some(b=>b.textContent==='確認済みにして次へ')"), false);
   checks.push('390pxで横はみ出しなし、未確認18件一覧・Escape・Tab/Enterで終了、終了後は読み取り専用');
+
+  phase = 'historical-delta';
+  await select('#meeting-entry', entries[0].id);
+  await prisma.project.update({ where: { id: entries[0].projectId }, data: { progress: 95, status: 'IN_PROGRESS', version: { increment: 1 } } });
+  await click('最新の状態を取得'); await waitFor(bodyHas('95％'), 'later-progress');
+  assert.equal(await evaluate(bodyHas('＋40ポイント')), true);
+  assert.equal(await evaluate(bodyHas('この会議の確認時')), true);
+  assert.equal(await evaluate(bodyHas('この会議の確認時の状態：確認待ち')), true);
+  assert.equal(await evaluate(bodyHas('現在の案件（会議後の更新を含む）：95％ · 進行中')), true);
+  assert.equal(await evaluate(bodyHas('現在の状態：')), false);
+  await fit(); await screenshot('meeting-history-390');
+  await select('#meeting-entry', entries[3].id); await waitFor(bodyHas('この会議では未確認'), 'historical-unconfirmed');
+  assert.equal(await evaluate(bodyHas('この会議の確認時の状態：')), false);
+  assert.equal(await evaluate(bodyHas('現在の案件（会議後の更新を含む）：0％ · 未着手')), true);
+  assert.equal(await evaluate("[...document.querySelectorAll('[aria-label=\"前回確認からの差分\"] dd')].at(-1).textContent"), '—');
+  checks.push('終了済みの確認時状態と現在状態を分離、未確認の当時状態は推測しない');
+  checks.push('会議終了後の現在95％と当時80％を分離し差分＋40を保持、未確認の当時値は推測しない');
 
   phase = 'new-meeting-team';
   await click('会議一覧に戻る'); await click('新しい会議を開始'); await waitFor(bodyHas('全21件 · 確認済み0件 · 未確認21件'), 'new-meeting');

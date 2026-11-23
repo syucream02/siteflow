@@ -2,16 +2,43 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ApiError, message, request, statusLabels, type Page, type Resource } from './workspace-api';
+import type { MeetingProgressComparison, ProjectStatus } from '@/lib/siteflow/domain';
 import styles from './connected-workspace.module.css';
 
 type Summary = { id: string; startedAt: string; endedAt: string | null };
 type Member = { userId: string; name: string };
 type Confirmation = { progress: number; status: string; confirmedAt: string; confirmedByNameSnapshot: string };
 type Entry = { id: string; projectId: string; nameAtStart: string; auditCount: number; confirmation: Confirmation | null;
+  previousConfirmation: { meetingId: string; confirmedAt: string; progress: number; status: ProjectStatus } | null;
+  comparison: MeetingProgressComparison;
   project: { name: string; dueDate: string; progress: number; status: string; archived: boolean; primaryName: string } };
 type Meeting = Summary & { version: number; canOperate: boolean; facilitator: Member | null;
-  counts: { total: number; confirmed: number; unconfirmed: number }; entries: Entry[] };
+  counts: { total: number; confirmed: number; unconfirmed: number };
+  comparisonCounts: { changed: number; noPrevious: number; unconfirmed: number }; entries: Entry[] };
 const dateLabel = (value: string) => new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', dateStyle: 'short', timeStyle: 'short' }).format(new Date(value));
+
+function comparisonLabel(entry: Entry) {
+  if (entry.comparison.source === 'unconfirmed') return 'この会議では未確認';
+  if (!entry.previousConfirmation) return '前回記録なし';
+  return [entry.comparison.progressChanged ? '進捗変更' : '', entry.comparison.statusChanged ? '状態変更' : ''].filter(Boolean).join('・') || '差分なし';
+}
+
+function ProgressComparison({ entry }: { entry: Entry }) {
+  const { previousConfirmation: previous, comparison } = entry;
+  const points = comparison.deltaPoints;
+  return <section className={styles.meetingComparison} aria-label="前回確認からの差分">
+    <dl className={styles.comparisonValues}>
+      <div><dt>前回確認</dt><dd>{previous ? `${previous.progress}％` : '—'}</dd></div>
+      <div><dt>{comparison.source === 'current' ? '現在' : 'この会議の確認時'}</dt><dd>{comparison.value ? `${comparison.value.progress}％` : '未確認'}</dd></div>
+      <div><dt>増減</dt><dd>{points === null ? '—' : `${points > 0 ? '＋' : points < 0 ? '−' : '±'}${Math.abs(points)}ポイント`}</dd></div>
+    </dl>
+    {previous ? <p className={styles.help}>比較元：{dateLabel(previous.confirmedAt)}の確認記録（今回の会議開始前に終了した会議）</p> : <p className={styles.help}>前回の確認記録なし。初回や過去に未確認の案件は、0％とみなさず増減を表示しません。</p>}
+    {comparison.value && <p>{comparison.source === 'current' ? '現在の状態' : 'この会議の確認時の状態'}：{statusLabels[comparison.value.status]}</p>}
+    {comparison.value && previous && <p>状態の比較：{statusLabels[previous.status]} → {statusLabels[comparison.value.status]}</p>}
+    <p className={styles.comparisonBadge}>{comparisonLabel(entry)}</p>
+    {comparison.changedAfterConfirmation && <p className={styles.notice}>確認後に変更あり。確認時の記録は保持しています。最新値で記録し直す場合は、確認を取り消してから再確認してください。</p>}
+  </section>;
+}
 
 export function MeetingWorkspace({ teamId, signedOut, savingChanged }: { teamId: string; signedOut: () => void; savingChanged: (busy: boolean) => void }) {
   const [meetings, setMeetings] = useState<Resource<Page<Summary>>>({ phase: 'loading' });
@@ -72,7 +99,7 @@ export function MeetingWorkspace({ teamId, signedOut, savingChanged }: { teamId:
       <p>開始時の通常案件を、納期が近い順に確認します。途中で画面を閉じても、同じ会議から続けられます。</p>
       <div className={styles.editField}><label htmlFor="meeting-facilitator">新しい会議の進行役</label><select id="meeting-facilitator" value={facilitator} disabled={busy} onChange={e => setFacilitator(e.target.value)}><option value="">指定しない（全メンバーが進行可能）</option>{memberChoices}</select></div>
       {memberFeedback}<button className={styles.primary} disabled={busy} onClick={start}>{busy ? '処理中…' : '新しい会議を開始'}</button>
-      <p className={styles.help}>現在は全案件の確認に対応しています。重要業務優先・前回との差分・決定事項は準備中です。</p>
+      <p className={styles.help}>全案件の確認と、前回の有効な確認記録からの進捗・状態の差分に対応しています。重要業務優先・決定事項は準備中です。</p>
       {error && <p role="alert" className={styles.error}>{error}</p>}
       {meetings.phase === 'loading' && <p role="status">会議を読み込んでいます…</p>}
       {meetings.phase === 'error' && <p role="alert" className={styles.error}>{meetings.message}</p>}
@@ -144,14 +171,16 @@ function MeetingRoom({ teamId, meetingId, signedOut, savingChanged, memberChoice
       <button disabled={busy || finishing} onClick={() => void refresh()}>最新の状態を取得</button>
       {meeting && <>
         <p className={styles.meetingCounts}>全{meeting.counts.total}件 · 確認済み{meeting.counts.confirmed}件 · 未確認{meeting.counts.unconfirmed}件</p>
+        <p className={styles.help}>進捗・状態の差分あり{meeting.comparisonCounts.changed}件 · 前回記録なし{meeting.comparisonCounts.noPrevious}件{meeting.endedAt ? ` · 今回未確認${meeting.comparisonCounts.unconfirmed}件` : ''}。差分は{meeting.endedAt ? 'この会議の確認時の値' : '現在値'}と比較します。</p>
         <p>進行役：{meeting.facilitator?.name ?? '指定なし'}{!meeting.endedAt && !meeting.canOperate ? '（確認操作は進行役が行います）' : ''}</p>
         {!meeting.endedAt && <><div className={styles.editField}><label htmlFor="change-facilitator">進行役の変更</label><select id="change-facilitator" disabled={busy || finishing || !meeting.canOperate} value={facilitator} onChange={e => setFacilitator(e.target.value)}><option value="__keep">変更先を選んでください</option><option value="">指定しない</option>{memberChoices}</select></div>{memberFeedback}<button disabled={busy || finishing || !meeting.canOperate || facilitator === '__keep'} onClick={() => void act('facilitator', { facilitatorUserId: facilitator || null })}>進行役を変更</button></>}
-        <div className={styles.editField}><label htmlFor="meeting-entry">確認する案件（自分の画面だけ切り替わります）</label><select id="meeting-entry" value={entryId} disabled={busy || finishing} onChange={e => setEntryId(e.target.value)}>{meeting.entries.map((item, i) => <option key={item.id} value={item.id}>{i + 1}. {item.project.name} · {item.confirmation ? '確認済み' : '未確認'}</option>)}</select></div>
+        <div className={styles.editField}><label htmlFor="meeting-entry">確認する案件（自分の画面だけ切り替わります）</label><select id="meeting-entry" value={entryId} disabled={busy || finishing} onChange={e => setEntryId(e.target.value)}>{meeting.entries.map((item, i) => <option key={item.id} value={item.id}>{i + 1}. {item.project.name} · {item.confirmation ? '確認済み' : '未確認'} · {comparisonLabel(item)}</option>)}</select></div>
         {entry && <article className={styles.meetingCard} aria-labelledby="meeting-project-title">
           <p className={styles.eyebrow}>{index + 1} / {meeting.counts.total}</p><h3 id="meeting-project-title" ref={heading} tabIndex={-1}>{entry.project.name}</h3>
           <p>主担当：{entry.project.primaryName} · 納期：{entry.project.dueDate}</p>
           {entry.project.archived && <p className={styles.notice}>会議開始後に保管された案件です。この会議の対象記録には残ります。</p>}
-          <p>現在：<strong>{entry.project.progress}％</strong> · {statusLabels[entry.project.status]}</p>
+          <ProgressComparison entry={entry} />
+          {meeting.endedAt && <p>現在の案件（会議後の更新を含む）：<strong>{entry.project.progress}％</strong> · {statusLabels[entry.project.status]}</p>}
           {entry.confirmation ? <p className={styles.success}>確認時：{entry.confirmation.progress}％ · {statusLabels[entry.confirmation.status]}<br />{dateLabel(entry.confirmation.confirmedAt)} · {entry.confirmation.confirmedByNameSnapshot}</p> : <p>この会議では未確認です。</p>}
           {!meeting.endedAt && <button className={styles.primary} disabled={busy || finishing || !meeting.canOperate} onClick={() => void act(entry.confirmation ? 'unconfirm' : 'confirm', { entryId: entry.id })}>{entry.confirmation ? '確認を取り消す' : '確認済みにして次へ'}</button>}
           {entry.auditCount > 1 && <p className={styles.help}>取消前の確認記録も保持されています。</p>}

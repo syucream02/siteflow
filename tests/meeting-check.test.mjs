@@ -26,6 +26,7 @@ describe('専用MySQLとHTTPで会議の保存・権限・競合を検証', { sk
     const id = await start(), meeting = await read(id);
     assert.deepEqual(meeting.counts, { total: 21, confirmed: 0, unconfirmed: 21 });
     assert.equal(meeting.entries.every(entry => entry.confirmation === null), true);
+    assert.equal(meeting.entries.every(entry => entry.previousConfirmation === null && entry.comparison.deltaPoints === null), true);
     assert.equal(await api.prisma.meetingConfirmation.count({ where: { entry: { meetingId: id } } }), 0);
   });
   it('保管を除外し、開始後に増えた案件は同じ会議へ混ぜない', async () => {
@@ -132,5 +133,96 @@ describe('専用MySQLとHTTPで会議の保存・権限・競合を検証', { sk
       const response = await call(collection(), 'POST', {}); assert.equal(response.status, 409); assert.equal((await response.json()).code, 'MEETING_TARGET_COUNT');
       assert.equal(await api.prisma.meeting.count({ where: { teamId: data.teamIds[0] } }), before);
     } finally { await api.prisma.project.deleteMany({ where: { id: { in: ids } } }); }
+  });
+
+  // 各ケースの架空チームを分離し、既存ケースや本来の業務データを変更しない。
+  async function comparisonFixture(run) {
+    const { createLocalWorkspaceData, removeLocalWorkspaceData } = await import('../examples/mysql/local-workspace-data.ts');
+    const { readMeetingForUser } = await import('../examples/mysql/meeting-service.ts');
+    const fixture = await createLocalWorkspaceData(api.prisma);
+    try {
+      const teamId = fixture.teamIds[0];
+      const person = await api.prisma.teamParticipant.findUniqueOrThrow({ where: { teamId_userId: { teamId, userId: fixture.userId } } });
+      const at = day => new Date(`2026-01-${String(day).padStart(2, '0')}T10:00:00.000Z`);
+      const makeMeeting = async (day, endedDay = null) => api.prisma.meeting.create({ data: {
+        id: randomUUID(), teamId, createdByParticipantId: person.id, startedAt: at(day), endedAt: endedDay === null ? null : at(endedDay),
+      } });
+      const makeEntry = async (meeting, index = 0) => api.prisma.meetingProject.create({ data: {
+        id: randomUUID(), teamId, meetingId: meeting.id, projectId: fixture.projectIds[index], position: index, nameSnapshot: '差分検証の架空案件',
+      } });
+      const confirm = async (entry, day, progress, extra = {}) => api.prisma.meetingConfirmation.create({ data: {
+        id: randomUUID(), teamId, entryId: entry.id, progress, status: 'IN_PROGRESS', projectVersion: 1,
+        confirmedAt: at(day), confirmedByParticipantId: person.id, confirmedByNameSnapshot: '差分検証ユーザー', ...extra,
+      } });
+      const readFor = async meeting => { const result = await readMeetingForUser(api.prisma, fixture.userId, teamId, meeting.id); assert.equal(result.ok, true); return result.meeting; };
+      await run({ fixture, teamId, at, makeMeeting, makeEntry, confirm, readFor });
+    } finally { await removeLocalWorkspaceData(api.prisma, fixture); }
+  }
+
+  it('案件ごとの最後の有効確認を一括取得し、直前の未確認・取消・進行中・開始後終了を除く', async () => {
+    await comparisonFixture(async ({ fixture, at, makeMeeting, makeEntry, confirm, readFor }) => {
+      const older = await makeMeeting(1, 3), oldEntry = await makeEntry(older);
+      const valid = await confirm(oldEntry, 2, 40);
+      await confirm(oldEntry, 2, 90, { revokedAt: at(3) });
+      const skipped = await makeMeeting(4, 6); await makeEntry(skipped);
+      const ongoing = await makeMeeting(7); await confirm(await makeEntry(ongoing), 8, 70);
+      const overlapping = await makeMeeting(9, 15); await confirm(await makeEntry(overlapping), 10, 80);
+      const current = await makeMeeting(12); await makeEntry(current); await makeEntry(current, 20);
+      await api.prisma.project.update({ where: { id: fixture.projectIds[0] }, data: { progress: 60, status: 'REVIEW' } });
+      const result = await readFor(current), entry = result.entries[0];
+      assert.equal(entry.previousConfirmation.meetingId, older.id);
+      assert.equal(entry.previousConfirmation.confirmedAt.toISOString(), valid.confirmedAt.toISOString());
+      assert.equal(entry.comparison.deltaPoints, 20); assert.equal(entry.comparison.progressChanged, true); assert.equal(entry.comparison.statusChanged, true);
+      assert.equal(result.entries[1].previousConfirmation, null);
+      assert.deepEqual(result.comparisonCounts, { changed: 1, noPrevious: 1, unconfirmed: 0 });
+      // 後から別会議を終了しても、今回の開始時点より後なので比較元は変えない。
+      await api.prisma.meeting.update({ where: { id: ongoing.id }, data: { endedAt: at(16) } });
+      assert.equal((await readFor(current)).entries[0].previousConfirmation.meetingId, older.id);
+    });
+  });
+
+  it('同時刻の確認はIDで安定選択し、開始と同時刻の終了を前回に含めない', async () => {
+    await comparisonFixture(async ({ at, makeMeeting, makeEntry, confirm, readFor }) => {
+      const older = await makeMeeting(1, 3), entry = await makeEntry(older);
+      const first = await confirm(entry, 2, 30), second = await confirm(entry, 2, 45);
+      const expected = first.id > second.id ? first : second;
+      const current = await makeMeeting(10); await makeEntry(current);
+      const boundary = await makeMeeting(5, 10); await confirm(await makeEntry(boundary), 6, 90);
+      for (let i = 0; i < 2; i++) assert.equal((await readFor(current)).entries[0].previousConfirmation.progress, expected.progress);
+      assert.equal((await readFor(current)).startedAt.toISOString(), at(10).toISOString());
+    });
+  });
+
+  it('確認後の変更を表示し、終了後は確認値の差分と未確認を保持する', async () => {
+    await comparisonFixture(async ({ fixture, at, makeMeeting, makeEntry, confirm, readFor }) => {
+      const older = await makeMeeting(1, 3); await confirm(await makeEntry(older), 2, 20);
+      const current = await makeMeeting(10), entry = await makeEntry(current); await makeEntry(current, 1);
+      const saved = await confirm(entry, 11, 40);
+      await api.prisma.project.update({ where: { id: fixture.projectIds[0] }, data: { progress: 60, status: 'IN_PROGRESS' } });
+      assert.equal((await readFor(current)).entries[0].comparison.changedAfterConfirmation, true);
+      await api.prisma.meeting.update({ where: { id: current.id }, data: { endedAt: at(12) } });
+      const before = await readFor(current);
+      assert.equal(before.entries[0].comparison.deltaPoints, 20);
+      assert.equal(before.entries[1].comparison.source, 'unconfirmed');
+      assert.equal(before.entries[1].comparison.deltaPoints, null);
+      await api.prisma.project.update({ where: { id: fixture.projectIds[0] }, data: { progress: 95, status: 'REVIEW' } });
+      const after = await readFor(current);
+      assert.deepEqual(after.entries[0].comparison, before.entries[0].comparison);
+      assert.equal(after.entries[0].project.progress, 95);
+      assert.deepEqual(await api.prisma.meetingConfirmation.findUniqueOrThrow({ where: { id: saved.id } }), saved);
+    });
+  });
+
+  it('別チーム・別案件の過去記録を比較元へ混ぜず、権限なしの会議取得を拒否', async () => {
+    await comparisonFixture(async ({ fixture, teamId, makeMeeting, makeEntry, confirm, readFor }) => {
+      const old = await makeMeeting(1, 3); await confirm(await makeEntry(old, 1), 2, 75);
+      const current = await makeMeeting(10); await makeEntry(current);
+      assert.equal((await readFor(current)).entries[0].previousConfirmation, null);
+      const { readMeetingForUser } = await import('../examples/mysql/meeting-service.ts');
+      const forbidden = await readMeetingForUser(api.prisma, outsider.userId, teamId, current.id);
+      assert.equal(forbidden.status, 403);
+      const wrongTeam = await readMeetingForUser(api.prisma, fixture.userId, fixture.teamIds[1], current.id);
+      assert.equal(wrongTeam.status, 404);
+    });
   });
 });

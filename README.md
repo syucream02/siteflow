@@ -6,14 +6,19 @@
 
 **公開は手動で行っており、自動デプロイ（CD）は未導入です。** GitHub ActionsのCIは検査・イメージ保存の仕組みで、本番への自動反映とは別です。OIDCなどを使う新CDはローカル検証の段階で保留しており、今回の公開には使用していません。
 
-公開資料のAWS識別子・個人PCパスは匿名化しています。`deploy/manual-public.py`は公開用テンプレートで、EBS識別子の仮値のままでは安全確認で停止します。実環境の構成記録と照合し、対象を確定してから使う設計です。公開用ソースの整理だけで稼働中のEC2設定を変更することはありません。
+**会議の進捗差分表示は、ローカル実装・検証済み、本番未反映です。** 前回の有効な確認記録と進捗率・状態を比較し、増減をポイント単位で表示します。比較元日時・記録なし・確認後の変更・終了済み会議の当時値の保持に対応しています。前回記録なし・今回未確認でも現在の状態名を表示します。[会議の仕様と検証範囲](docs/MEETING_FLOW.md)を参照してください。
+
+公開用の運用テンプレートではAWS識別子・個人PCパスを匿名化しています。過去の検証資料には環境のリソースIDが残っており、秘密情報とは区別して公開範囲を点検します。`deploy/manual-public.py`は公開用テンプレートで、EBS識別子の仮値のままでは安全確認で停止します。実環境の構成記録と照合し、対象を確定してから使う設計です。公開用ソースの整理だけで稼働中のEC2設定を変更することはありません。
 
 ## 現在できること
+
+次の表はコード上の実装範囲です。公開HTTPSで確認済みなのは、冒頭のログイン・案件作成/保存/再取得・ログアウトです。その他の機能のローカル検証を、本番環境での動作確認済みとは扱いません。
 
 | 画面 | 保存・認証 | 機能 |
 | --- | --- | --- |
 | `/workspace` | MySQLへ保存、準備用アカウントでログイン。接続モードをサーバーで指定 | 所属チーム選択、案件登録・一覧・詳細・基本編集、主副担当変更、進捗/状態更新、完了/理由付き再開、保管/閲覧/復元、担当・進捗/状態の履歴 |
 | `/` | Reactのメモリ。再読み込みでリセット | 指摘登録、状態/期限の絞り込み、対応記録、確認依頼・差し戻し・完了、集計 |
+| `/workspace` の会議画面 | ローカルの検証用MySQLで確認。本番での全操作は未検証、今回の差分表示は本番未反映 | 会議開始・確認/取消・継続・終了、前回確認からの進捗/状態差分、確認後の変更表示、終了済み会議の記録保持 |
 
 未指定の公開用ビルドでは`/workspace`は案内のみ、APIは404です。公開プレビューは専用のURLとモードを明示した場合だけ有効になり、不正な設定では閉じます。[接続モードと検証手順](docs/WORKSPACE_PREVIEW.md)を参照してください。ビルド成功を公開環境の完成とは扱いません。
 
@@ -43,15 +48,15 @@
 
 | 技術 | 役割 |
 | --- | --- |
-| Next.js 16.3.4 / React 19 / TypeScript | App Router、フォーム・状態管理、型検査、ローカルAPIへの中継 |
-| Node.js / Better Auth | `examples/mysql/`に分離したローカル検証用の認証・業務API |
+| Next.js 16.3.4 / React 19 / TypeScript | App Router、フォーム・状態管理、型検査、統合APIとローカルAPIへの中継 |
+| Node.js / Better Auth | Next.js内のAPIから共通の認証・業務処理を利用。`examples/mysql/`の分離APIはローカル検証にも使用 |
 | Prisma / MySQL 8.4 | 案件・担当・履歴の保存、制約・トランザクション |
 | node:test / 実Chromeによる検証 | 業務ルール・中継・API/DB・実画面の操作確認 |
 
 ```mermaid
 flowchart LR
   A[React画面 /workspace] --> B[Next.js /api/siteflow]
-  B --> C[ローカル認証・業務API]
+  B --> C[共通の認証・業務処理]
   C --> D[本人・現在の所属・権限を確認]
   D --> E[独立した業務ルール]
   E --> F[Prisma → MySQL]
@@ -116,7 +121,7 @@ npm run build
 npm start
 ```
 
-`http://127.0.0.1:3000/`でメモリデモ、`/workspace`でローカル専用の案内を確認できます。DB接続版を公開環境で利用できる状態にはまだしていません。
+追加の公開用設定を指定しない場合、`http://127.0.0.1:3000/`でメモリデモ、`/workspace`で接続の案内を確認できます。ビルドだけではDB接続版は有効になりません。既存AWSの公開版は、別途明示した本番設定で稼働しています。
 
 ## 検証
 
@@ -124,7 +129,7 @@ npm start
 
 ```sh
 npx tsc --noEmit --incremental false
-node --experimental-strip-types --test tests/domain.test.mjs tests/local-api.test.mjs tests/public-api-settings.test.mjs tests/public-api-proxy.test.mjs tests/workspace-connection.test.mjs
+node --experimental-strip-types --test tests/domain.test.mjs tests/meeting-domain.test.mjs tests/local-api.test.mjs tests/public-api-settings.test.mjs tests/public-api-proxy.test.mjs tests/workspace-connection.test.mjs
 npm run lint
 npm run build
 ```
@@ -147,12 +152,23 @@ npm --prefix examples/mysql run test:auth-check
 | `lib/siteflow/domain.ts` | React/HTTPから独立した入力検証・権限/状態遷移の業務ルール |
 | `lib/siteflow/local-api.ts` | 開発限定の許可経路・Host/Origin・本文上限・Cookie/応答の制限 |
 | `examples/mysql/` | ローカル検証用API・Prisma・保存サービス・画面検証 |
-| `db/design/` | 統合スキーマとSQL履歴。ローカル検証済み、本番未適用 |
+| `db/design/` | 統合スキーマとSQL履歴。本番への適用記録は手動公開記録を参照。今回の会議差分に追加DB変更は不要 |
 | `tests/` | 業務・中継・API/DBのテスト |
 
 学習用の図・短いコード・問い・説明例は[理解ノート](docs/LEARNING_GUIDE.html)の1ファイルへまとめています。ローカルでブラウザーから開き、1テーマずつ読めます。[非機能要件](docs/NON_FUNCTIONAL_REQUIREMENTS.md)では目標と測定結果を区別しています。[データモデル](docs/DATA_MODEL.md)、[Next.js移行記録](docs/NEXTJS_MIGRATION.md)も参照できます。
 
-## 今後の範囲
+## ローカルで検証済みの会議機能と、今後の範囲
+
+会議の進捗差分はローカルの実DB・Chromeで検証済みです。業務55件（うち会議ルール13件）、会議HTTP/DB15件、会議Chrome操作12項目が成功しています。会議ルール13件を既存CIへ追加するローカル変更も用意しました。GitHub Actionsでの実行結果は未確認です。HTTP/DB・Chrome試験をCIへ追加した意味ではありません。
+
+未完成・未検証として残る主な範囲は以下です。
+
+- 新規登録・実メール認証・招待、チーム作成/所属管理の画面
+- 重要業務優先・相談事項、決定事項/引き継ぎ、写真・報告書、検索・全体集計
+- 大量会議履歴での性能、全ブラウザー・読み上げ、本番環境での会議操作全体
+- 基本情報や保管/復元操作そのものの監査履歴、案件新規登録の冪等性（二重保存の防止）
+
+### 過去の開発記録
 
 以下には初回公開前の検証履歴も含みます。「まだ公開していない」「AWSへ反映していない」は当時の記録で、最新の公開状態は冒頭と[手動公開記録](docs/MANUAL_PUBLIC_RELEASE.md)を優先してください。
 
@@ -166,7 +182,7 @@ npm --prefix examples/mysql run test:auth-check
 
 - 公開環境の認証・セッション/メール・配信構成と、その環境での検証
 - ユーザー登録/招待、チーム作成・所属管理の画面（関連APIの一部は検証済み）
-- 会議の進捗差分/重要業務優先/相談事項、決定事項/引き継ぎ、写真・報告書、検索・全体集計（会議の開始/確認/取消/継続/終了の最小範囲はローカル実装・検証済み）
+- 会議の重要業務優先/相談事項、決定事項/引き継ぎ、写真・報告書、検索・全体集計（会議の開始/確認/取消/継続/終了と進捗差分表示はローカル実装・検証済み）
 - 基本情報や保管/復元操作そのものの監査履歴、サーバー側の新規登録の冪等性、性能・読み上げ等の追加検証
 
 旧Sites/Vinext/Cloudflare用の設定・依存は段階的な整理のため残っていますが、通常の開発起動はNext.jsです。ローカルのCI/Docker/配信候補は更新済みです。AWS設定・GitHub設定・push・本番反映はしておらず、既存AWSのVinextへ今回の版を送っていません。

@@ -33,6 +33,9 @@ jobs:
         with:
           node-version: '22'
 
+      - name: Test meeting domain rules
+        run: node --experimental-strip-types --test tests/meeting-domain.test.mjs
+
       - name: Test immutable image identity and release switch
         run: node --test tests/image-record.test.mjs
 
