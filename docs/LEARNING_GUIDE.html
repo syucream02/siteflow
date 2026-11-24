@@ -33,7 +33,7 @@
   <h1>一度に、ひとつ分かればいい。</h1>
   <p class="intro">1回5分、図やコードを1ブロックずつ。図を見る → 実コードを読む → 小さく書く。<br>開発が進んだら、このノートに追記していきます。</p>
   <div class="course-shortcuts" aria-label="実コードを読む4テーマ"><p>初心者向けの実コード教材：この順で、ひとつずつ。</p><button type="button" data-topic="react">① React</button><button type="button" data-topic="typescript">② TypeScript</button><button type="button" data-topic="next">③ Next.js</button><button type="button" data-topic="api">④ API</button></div>
-  <p class="small muted" style="margin-top:12px">現在地：会議差分のCIテスト追加とREADME整理をローカルで完了。CIの保留差分は反映対象から除外する。Next.jsの初回公開は維持し、今回の機能は本番未反映。新CD/OIDCは保留。以前のテーマには開発当時の未実装・未接続の記録も含みます。アプリの最新状態は「まず、全体像」と最新の開発履歴を確認してください。</p>
+  <p class="small muted" style="margin-top:12px">現在地：CDを一時中断し、ローカル保存を整理して本体の機能開発へ戻る準備。polling方式・incident v2はローカル検証済み、現行CIのAction SHA固定も完了。1026件とAction関連202件はそれぞれ過去の検証結果です。保留AWS方式の未確定pinは別に残り、実通知・実復旧・本番CDは未導入。本番CDはNO-GO。公開環境は変更していません。</p>
   <div class="status" aria-label="アプリの現在地">
     <div><strong><span class="badge">画面</span> 2種類の画面</strong><span class="small muted">/ はメモリ・/workspace はDB接続</span></div>
     <div><strong><span class="badge">DB</span> 専用DBで検証済み</strong><span class="small muted">履歴保持・誤参照など13件成功</span></div>
@@ -60,8 +60,29 @@
 <!-- 更新する場所：headerの現在地と、このJSONのupdated・topics・journal。履歴とテーマIDを保ち、秘密情報は書かない。 -->
 <script id="learning-data" type="application/json">
 {
-  "updated": "2026-11-23",
+  "updated": "2026-11-24",
   "topics": [
+    {
+      "id": "poll-incident-m5",
+      "title": "CDの障害を記録し、人が安全に復旧を判断する",
+      "status": "ローカル模擬実装・検証済み",
+      "diagram": "poll-incident-m5",
+      "one": "incident IDは同じ事故をまとめる目印、v2のチェックサムは日時も含めた記録の破損を検出する値です。",
+      "points": [
+        "障害詳細はversion:2。incident IDは時刻とチェックサムを除いて計算し、integritySha256は自身だけを除く記録全体を検証する。",
+        "v1や破損記録は自動移行・上書きしない。状態破損はunknown/null、保存不能は失敗として停止。秘密情報・例外全文は記録しない。",
+        "統合経路から通知計画を生成し、同じ事故は300秒抑制。新stable故障時も旧rollbackを照合して計画だけ作り、incidentは解除しない。"
+      ],
+      "why": "IDだけで重複をまとめながら日時まで検証すると、違う2つの役割が混ざります。v2では重複判定と記録全体の破損検出を分離しました。SHA-256は同じですが、対象が違います。承認期限後も時計と保存先が妥当なら事故を記録でき、通知成功でも解決とは扱いません。",
+      "proof": "修正後は既存1000＋追加26＝1026件成功、失敗・skip0。変更7ファイルのESLintはエラー・警告0、修正差分レビューPASS。統合処理からの状態破損・起動復帰失敗の記録と通知計画、別port/digestのrollback、日時改変とv1拒否を確認。前回の結果で、今回の文書更新では回帰テストを再実行していません。",
+      "pending": "チェックサムは偶発的破損の検出であり、書込権限のある攻撃者の再計算を防ぐ署名/MACではありません。保存先・時計が利用不能なら記録自体を保証できません。実Linuxの権限/fsync/電源断、実通知、実復旧、Certbot排他、実認証と保存元の真正性は未検証。本番CDはNO-GOです。",
+      "question": "occurredAtだけを別の有効な整数に変えると、incident IDとチェックサムはどうなる？",
+      "answer": "IDの計算対象に日時は含まれないためIDは同じですが、日時を含むintegritySha256は一致しなくなり拒否します。ハッシュを付け直して採用したり、v1を勝手にv2へ変えたりしません。通知成功もincident解除にはなりません。",
+      "pitch": "同じ事故の通知をまとめるIDと、日時を含めた記録の破損検出を分離しました。新stableが故障した場合も、正常な旧rollbackのID・digest・設定などを照合して復旧計画だけを作ります。Windowsの模擬検証とレビューはPASSですが、実通知・実復旧・本番CDは未導入です。",
+      "exercise": "identityとintegrityで除外する項目を比較しましょう。小さな練習：日時の改変を検出しても、なぜ悪意ある改ざんの防止とは言えないか1文で説明する。詳しい復旧手順はdocs/APPROVED_CD_SETUP.mdのincident v2節を読み、STOP中の起動禁止と別承認の位置を確認する。",
+      "code": { "file": "deploy/poll/incident.mjs / createIncidentRecord", "text": "record.incidentId = hash(identity(record));\nrecord.integritySha256 = integrity(record);" },
+      "files": ["deploy/poll/incident.mjs", "deploy/poll/persistent-state.mjs", "deploy/poll/integration.mjs", "deploy/poll/recovery.mjs", "tests/poll-incident.test.mjs", "docs/APPROVED_CD_SETUP.md"]
+    },
     {
   "id": "overview",
   "title": "まず、全体像",
@@ -3632,6 +3653,62 @@
 ],
   "journal": [
 {
+  "date": "2026-11-24",
+  "title": "CDを一時中断し、機能開発へ戻るための保存準備",
+  "changes": [
+    "89項目をK1〜K4の保存単位へ分類。生成キャッシュ2件を除外し、資料の実環境識別子をプレースホルダーへ整理。",
+    "現行CIのAction SHA固定完了と、保留AWS方式の未確定pinを区別。旧履歴は当時の記録として保持。",
+        "再開時の個別承認・実GitHub確認・隔離Linux試験・本番導入前確認を既存資料へ記録。追加承認に基づき、保留AWSコード／設定例の実環境情報も例示値へ整理。無効化と完全一致の対象制限は維持。"
+  ],
+  "why": "ローカルコミットは作業を保存する操作で、本番への配信とは別です。関連するコードとテストを同じ単位にし、依存先が欠けたコミットを避けます。K1はpollingモデル、K2は保留AWSとCI契約、K3は資料、K4は開発規約。",
+      "proof": "既存1026件成功は過去の結果として再利用。公開用整理後のAWS・CI関連203件は成功、失敗0件、ESLintはエラー・警告0件。設定例の拒否とIAMの対象制限を追加確認した。資料構文・秘密情報・ステージ対象も確認する。SHA固定は現行ci.ymlの6参照、保留AWS側の全0 pinは有効化しない。",
+      "limit": "例示値は実環境操作用の設定ではない。外部接続・push・Actions・pending run操作・本番操作は行わない。チェックサムは署名ではなく、実Linux・実通知・実復旧は未検証。本番CDはNO-GO。",
+  "topic": "poll-incident-m5",
+  "files": ["docs/APPROVED_CD_SETUP.md", "docs/LEARNING_GUIDE.html", "docs/AWS_CD_STAGE1.md", "docs/EC2_PAT_READONLY_PLAN.md"]
+},
+{
+  "date": "2026-11-24",
+  "title": "incident v2：日時を含む破損検出と、復旧計画の仕様を記録",
+  "changes": [
+    "既存M5テーマをv2へ更新。IDと全体チェックサムの対象、v1を保全して拒否する理由を整理。",
+    "状態破損・保存不能、通知計画の300秒抑制、故障stableから正常rollbackへの照合と別承認を説明。",
+    "直近1026件成功・修正差分レビューPASSを過去の実行結果として追記。本番未検証と実操作禁止を維持。"
+  ],
+  "why": "仕様がv1のままだと、日時の改変検出や旧記録の扱いを誤解するため。図は事故記録→IDで通知を集約→全体チェックサム→人が復旧を判断。30秒の説明：事故の識別と記録の破損検出は別で、通知できても事故は解決していません。問いと練習は同じM5テーマに集約する。",
+  "proof": "今回は文書2ファイルだけを更新。コード根拠と照合し、教材JSON/JavaScript構文・HTMLタグ対応・ID/リンクを静的確認。87テーマのIDと既存132件の開発履歴を保持し、履歴1件だけを追記。1026件成功は前回の検証結果で、今回の回帰テスト再実行ではない。",
+  "limit": "コード・依存・Git反映・外部接続・本番操作なし。実Linux・実通知・実復旧は未検証。本番CDはNO-GO、チェックサムは署名ではない。",
+  "topic": "poll-incident-m5",
+  "files": ["docs/APPROVED_CD_SETUP.md", "docs/LEARNING_GUIDE.html", "deploy/poll/incident.mjs", "deploy/poll/integration.mjs", "deploy/poll/boot-recovery.mjs", "deploy/poll/recovery.mjs"]
+},
+{
+  "date": "2026-11-24",
+  "title": "M5：障害記録・通知計画・手動復旧を分離",
+  "changes": [
+    "許可項目だけの永続障害記録と通知試行を追加。書込失敗・不明な状態を成功扱いしない。",
+    "6段階の復旧計画と再開前チェックを追加。STOP中は稼働中stableの確認のみ、3002・migration・自動解除は禁止。",
+    "Next.js用の運用手順と学習図を追記。M4を含む既存テストを保持し、模擬成功と本番検証を区別。"
+  ],
+  "why": "障害時も古い承認や不明な整理状態から自動配信を再開させないため。通知を予約した記録、模擬送信結果、事故解決は別々に扱う。",
+  "proof": "M5追加68＋既存932＝1000件成功、失敗・skip0。ESLint対象5ファイル0/0。初回回帰で完了済みIDの再利用拒否を事故と誤記録する1失敗を検出。今回消費した配信の失敗と開始前の通常拒否を分離し、既存テストを緩めず全回帰を再実行して成功。",
+  "limit": "実API/認証/通知/EC2操作なし。incident解除入口は作らない。M4の実Docker削除・Linuxの永続性・Certbot競合は未検証で本番CDはNO-GO。",
+  "topic": "poll-incident-m5",
+  "files": ["deploy/poll/incident.mjs", "deploy/poll/persistent-state.mjs", "deploy/poll/integration.mjs", "deploy/poll/recovery.mjs", "tests/poll-incident.test.mjs", "docs/APPROVED_CD_SETUP.md"]
+},
+{
+  "date": "2026-11-24",
+  "title": "M3：生成する承認記録をpolling側の契約へ合わせる",
+  "changes": [
+    "同じrunのCI成功→production本人承認→厳密trueの許可→JSON/artifact生成へ戻し、保留AWS producerだけをCIから外した。実配信やmigrationは追加していない。",
+    "app/migrationのOCI digestをbuild outputsから引き継ぎ、ZIP digestと区別。実workflowの契約と不正な変更をNode標準のテストで検査する。",
+    "未確定Action pinは推測せず未解決として残す。既存pendingの同groupへpush/mergeしない停止条件と、別承認での確認項目を記録した。"
+  ],
+  "why": "生成側producerと取得側consumerの約束が違うと、安全な拒否が続き配信できない。図で読むとCI成功 → 本人承認 → 現在の許可 → 固定digest入りJSON → 別のpolling検証。30秒の説明：承認は本人の意思、許可変数は現在も配信してよいか、digestは対象そのものを表す指紋で、別々に確認する。考える問い：承認済みでもfalseなら何を作ってはいけないか。小さな練習：workflowでneeds・environment・2つのgateを探し、なぜ必要か自分の言葉で説明する。",
+  "proof": "既存852＋M3追加34＝886件を分割実行で確認。回帰884件後に拒否2件を追加し最終契約suite52件を再実行、すべて成功・失敗/skip0。AWS関連141件成功、ESLint対象2ファイル0/0。既存js-yamlでYAML構文/2jobs、教材JSONで86テーマIDと過去130履歴の保持を確認。concurrencyとpollingのexecutionAllowed:falseを維持。",
+  "limit": "GitHub反映・Actions実行・production承認・実API・本番操作はなし。全0Action SHAは有効な固定pinではないため反映NO-GO。既存js-yamlの構文解析と限定的な契約検査は、実GitHubの承認保護・式・artifact動作を証明しない。concurrencyの同group pendingが残る間は将来のpush/mergeも停止し、実run確認・処置は別承認。旧AWS/OIDC記録は当時の履歴として保持。",
+  "topic": "approved-cd-preparation",
+  "files": [".github/workflows/ci.yml", "tests/aws-cd.test.mjs", "tests/poll-workflow-policy.test.mjs", "docs/APPROVED_CD_SETUP.md", "deploy/release-record.mjs"]
+},
+{
   "date": "2026-11-23",
   "title": "会議ルールをCIへ追加し、公開状態の説明を整理",
   "changes": [
@@ -6242,6 +6319,9 @@
   }
   function note(text){return '<p class="diagram-note">'+text+'</p>';}
   function diagram(kind,state){
+    if(kind==="poll-incident-m5"){
+      return flow([["incident v2を保存","日時も含む全体チェックサム","good"],["IDで通知を集約","日時だけで別の事故にしない","good"],["人が復旧先を照合","故障stableと正常rollbackを区別","good"],["別承認・再開前確認","通知成功でもincidentを維持","good"]])+note("ローカルモデルです。チェックサムは署名ではありません。実通知・実復旧は行わず、STOP中の起動、3002への復帰、DB巻き戻しも行いません。");
+    }
     if(kind==="manual-first-public-release"){
       return flow([["公開HTTPS","証明書を検証して接続","good"],["Nginx → Next.js3001","公開readyを3回確認","good"],["正式MySQLへ保存","ログイン → 案件37% → 再取得 → ログアウト","good"]])+note("2026-11-21初回公開成功。旧Vinext3002は復旧用に保持。今回の業務操作は公開HTTPSのプログラム試験で、ブラウザーUIクリック試験とは別。");
     }
