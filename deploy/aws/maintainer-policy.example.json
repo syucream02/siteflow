@@ -1,0 +1,50 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:GetItem",
+        "dynamodb:ConditionCheckItem"
+      ],
+      "Resource": "arn:aws:dynamodb:ap-southeast-2:ACCOUNT_ID:table/SiteFlowRelease",
+      "Condition": {
+        "ForAllValues:StringLike": {
+          "dynamodb:LeadingKeys": [
+            "CONTROL#production",
+            "STOP#*",
+            "STATE#*",
+            "FINAL#*"
+          ]
+        },
+        "Null": {
+          "dynamodb:LeadingKeys": "false"
+        }
+      }
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:UpdateItem"
+      ],
+      "Resource": "arn:aws:dynamodb:ap-southeast-2:ACCOUNT_ID:table/SiteFlowRelease",
+      "Condition": {
+        "ForAllValues:StringLike": {
+          "dynamodb:LeadingKeys": [
+            "CONTROL#production"
+          ]
+        },
+        "Null": {
+          "dynamodb:LeadingKeys": "false"
+        },
+        "ForAllValues:StringEquals": {
+          "dynamodb:Attributes": [
+            "pk",
+            "epoch",
+            "notBefore"
+          ]
+        }
+      }
+    }
+  ]
+}

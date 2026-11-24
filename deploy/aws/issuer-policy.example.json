@@ -1,0 +1,122 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:GetItem"
+      ],
+      "Resource": "arn:aws:dynamodb:ap-southeast-2:ACCOUNT_ID:table/SiteFlowRelease",
+      "Condition": {
+        "ForAllValues:StringLike": {
+          "dynamodb:LeadingKeys": [
+            "CONTROL#production",
+            "STOP#*",
+            "GRANT#*",
+            "LEASE#*",
+            "STATE#*",
+            "FINAL#*"
+          ]
+        },
+        "Null": {
+          "dynamodb:LeadingKeys": "false"
+        }
+      }
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:ConditionCheckItem"
+      ],
+      "Resource": "arn:aws:dynamodb:ap-southeast-2:ACCOUNT_ID:table/SiteFlowRelease",
+      "Condition": {
+        "ForAllValues:StringLike": {
+          "dynamodb:LeadingKeys": [
+            "CONTROL#production",
+            "STOP#*"
+          ]
+        },
+        "Null": {
+          "dynamodb:LeadingKeys": "false"
+        }
+      }
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:PutItem"
+      ],
+      "Resource": "arn:aws:dynamodb:ap-southeast-2:ACCOUNT_ID:table/SiteFlowRelease",
+      "Condition": {
+        "ForAllValues:StringLike": {
+          "dynamodb:LeadingKeys": [
+            "GRANT#*",
+            "LEASE#*"
+          ]
+        },
+        "Null": {
+          "dynamodb:LeadingKeys": "false"
+        }
+      }
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:UpdateItem"
+      ],
+      "Resource": "arn:aws:dynamodb:ap-southeast-2:ACCOUNT_ID:table/SiteFlowRelease",
+      "Condition": {
+        "ForAllValues:StringLike": {
+          "dynamodb:LeadingKeys": [
+            "LEASE#*"
+          ]
+        },
+        "Null": {
+          "dynamodb:LeadingKeys": "false"
+        }
+      }
+    },
+    {
+      "Effect": "Deny",
+      "Action": [
+        "dynamodb:PutItem",
+        "dynamodb:UpdateItem",
+        "dynamodb:DeleteItem"
+      ],
+      "Resource": "arn:aws:dynamodb:ap-southeast-2:ACCOUNT_ID:table/SiteFlowRelease",
+      "Condition": {
+        "ForAnyValue:StringLike": {
+          "dynamodb:LeadingKeys": [
+            "CONTROL#*",
+            "STOP#*",
+            "USED#*",
+            "STATE#*",
+            "FINAL#*",
+            "ABORT#*"
+          ]
+        }
+      }
+    },
+    {
+      "Effect": "Allow",
+      "Action": "ssm:SendCommand",
+      "Resource": [
+        "arn:aws:ssm:ap-southeast-2:ACCOUNT_ID:document/SiteFlow-ApprovedRelease",
+        "arn:aws:ec2:ap-southeast-2:ACCOUNT_ID:instance/REQUIRES_APPROVED_INSTANCE_ID"
+      ]
+    },
+    {
+      "Effect": "Deny",
+      "Action": "ssm:SendCommand",
+      "NotResource": [
+        "arn:aws:ssm:ap-southeast-2:ACCOUNT_ID:document/SiteFlow-ApprovedRelease",
+        "arn:aws:ec2:ap-southeast-2:ACCOUNT_ID:instance/REQUIRES_APPROVED_INSTANCE_ID"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": "ssm:GetCommandInvocation",
+      "Resource": "*"
+    }
+  ]
+}

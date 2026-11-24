@@ -1,0 +1,68 @@
+name: SiteFlow trusted AWS signer
+on:
+  workflow_call:
+    inputs:
+      ci_run_id:
+        required: true
+        type: string
+      operation:
+        required: true
+        type: string
+permissions:
+  contents: read
+  actions: read
+  id-token: write
+  attestations: write
+jobs:
+  approved-release:
+    if: github.repository == 'syucream02/siteflow' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && github.run_attempt == 1 && vars.SITEFLOW_AWS_CD_READY == 'true'
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      # Implementation commit is separate from the signer workflow commit.
+      # This literal must match checkout.ref; variables cannot substitute it.
+      SITEFLOW_IMPLEMENTATION_SHA: '0000000000000000000000000000000000000000'
+      GH_TOKEN: ${{ github.token }}
+      SITEFLOW_RELEASE_ENABLED: ${{ vars.SITEFLOW_RELEASE_ENABLED }}
+      SITEFLOW_CI_RUN_ID: ${{ inputs.ci_run_id }}
+      SITEFLOW_OPERATION: ${{ inputs.operation }}
+    steps:
+      - name: Require start permission
+        shell: bash
+        run: test "$SITEFLOW_RELEASE_ENABLED" = true
+      - name: Reject unresolved implementation pin
+        run: test "$SITEFLOW_IMPLEMENTATION_SHA" != 0000000000000000000000000000000000000000
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: '0000000000000000000000000000000000000000'
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Write nonsecret configuration
+        env:
+          CONFIG_JSON: ${{ vars.SITEFLOW_AWS_CONFIG }}
+        run: node -e 'require("fs").writeFileSync("aws-config.json", process.env.CONFIG_JSON, {mode:384,flag:"wx"})'
+      - uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502
+        with:
+          role-to-assume: ${{ vars.SITEFLOW_AWS_ROLE_ARN }}
+          role-session-name: siteflow-${{ github.run_id }}
+          role-duration-seconds: 900
+          aws-region: ap-southeast-2
+      - name: Check CI, owner approval, main and AWS stop state
+        run: node deploy/aws/publish.mjs plan aws-config.json
+      # Pin to a reviewed real commit before any GitHub reflection. The zero
+      # pin intentionally makes this local preparation non-deployable.
+      - uses: actions/attest@0000000000000000000000000000000000000000
+        id: attestation
+        with:
+          subject-path: release.json
+      - name: Keep nonsecret attestation bundle
+        env:
+          BUNDLE_PATH: ${{ steps.attestation.outputs.bundle-path }}
+        run: node -e 'require("fs").copyFileSync(process.env.BUNDLE_PATH,"release.bundle.jsonl",require("fs").constants.COPYFILE_EXCL)'
+      - name: Publish one-time permission, invoke fixed SSM and renew lease
+        run: node deploy/aws/publish.mjs send aws-config.json
+      # Cancellation never runs a shell "cleanup deploy". The lease expires;
+      # EC2 performs reconciliation/rollback independently of this runner.

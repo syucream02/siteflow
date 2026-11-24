@@ -1,0 +1,15 @@
+{
+  "records": [
+    {
+      "pk": "CONTROL#production",
+      "epoch": 0,
+      "notBefore": 0
+    },
+    {
+      "pk": "STOP#0",
+      "operator": "bootstrap",
+      "stoppedAt": 0
+    }
+  ],
+  "note": "Initial state is stopped. No TTL on CONTROL/STOP/USED. Bootstrap opening requires separate approval."
+}

@@ -27,9 +27,9 @@ jobs:
 
     steps:
       - name: Checkout source code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '22'
 
@@ -38,6 +38,12 @@ jobs:
 
       - name: Test immutable image identity and release switch
         run: node --test tests/image-record.test.mjs
+
+      - name: Test polling workflow contract offline
+        run: node --test tests/poll-workflow-policy.test.mjs
+
+      - name: Test AWS release authorization offline
+        run: node --test tests/aws-cd.test.mjs tests/aws-cd-recovery.test.mjs
 
       - name: Validate production Compose configuration
         run: node scripts/check-deploy-config.mjs
@@ -81,7 +87,7 @@ jobs:
 
       - name: Log in to GitHub Container Registry
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: docker/login-action@v3
+        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -98,19 +104,24 @@ jobs:
           docker push "$IMAGE_NAME:${GITHUB_SHA}-migration"
           node deploy/image-record.mjs
 
+  # LOCAL PREPARATION ONLY: pins verified; GitHub reflection/production deployment need separate approval.
   release-approved:
     needs: docker-build
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.repository == 'syucream02/siteflow' && github.event_name == 'push' && github.ref == 'refs/heads/main' && github.run_attempt == 1
     runs-on: ubuntu-latest
     environment: production
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '22'
-      # productionの保護はGitHub側で先に設定する。名前だけでは承認必須にならない。
+      # GitHub production protection must already require the owner reviewer.
+      # Approval and the current strict release switch are separate conditions.
       - name: Check release permission switch
         id: release-switch
         env:
@@ -123,7 +134,7 @@ jobs:
           SITEFLOW_IMAGE_DIGEST: ${{ needs.docker-build.outputs.digest }}
           SITEFLOW_MIGRATION_DIGEST: ${{ needs.docker-build.outputs.migration_digest }}
         run: node deploy/release-record.mjs
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: steps.release-switch.outputs.enabled == 'true'
         with:
           name: approved-release-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}

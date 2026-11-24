@@ -1,0 +1,16 @@
+{
+  "note": "Local records only. Existence was checked in the prior read-only review; full action security/version review remains pending. Never invent a SHA or replace it with a mutable tag.",
+  "previouslyVerifiedExistence": {
+    "actions/checkout": "11bd71901bbe5b1630ceea73d27597364c9af683",
+    "actions/setup-node": "49933ea5288caeca8642d1e84afbd3f7d6820020",
+    "aws-actions/configure-aws-credentials": "e3dd6a429d7300a6a4c196c26e071d42e0343502"
+  },
+  "unresolved": [
+    "docker/login-action",
+    "actions/upload-artifact",
+    "actions/attest",
+    "trusted signer commit",
+    "trusted implementation commit"
+  ],
+  "gate": "NO_PUSH_NO_ACTIONS_UNTIL_ALL_PINS_REVIEWED"
+}

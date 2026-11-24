@@ -1,0 +1,22 @@
+[Unit]
+Description=SiteFlow one-time AWS release %i (installation requires separate approval)
+Requires=docker.service
+After=docker.service
+RequiresMountsFor=/srv/siteflow-mysql
+BindsTo=srv-siteflow\x2dmysql.mount
+After=srv-siteflow\x2dmysql.mount
+ConditionPathExists=/srv/siteflow-mysql/release-aws/enabled
+
+[Service]
+Type=oneshot
+UMask=0077
+MemoryMax=256M
+MemorySwapMax=0
+LimitCORE=0
+TimeoutStartSec=660
+TimeoutStopSec=60
+KillMode=control-group
+ExecStart=/usr/local/bin/node /usr/local/lib/siteflow/aws/worker.mjs run /srv/siteflow-mysql/release-aws/settings.json %i
+ExecStopPost=/usr/local/bin/node /usr/local/lib/siteflow/aws/worker.mjs recover /srv/siteflow-mysql/release-aws/settings.json %i
+StandardOutput=journal
+StandardError=journal

@@ -1,0 +1,31 @@
+name: SiteFlow AWS release request (disabled until separately configured)
+on:
+  workflow_dispatch:
+    inputs:
+      ci_run_id:
+        description: Successful main push CI run ID
+        required: true
+        type: string
+      operation:
+        description: Candidate inspection or separately approved publication
+        required: true
+        default: candidate
+        type: choice
+        options: [candidate, publish]
+permissions:
+  contents: read
+  actions: read
+  id-token: write
+  attestations: write
+concurrency:
+  group: siteflow-aws-production
+  cancel-in-progress: false
+jobs:
+  release:
+    if: github.repository == 'syucream02/siteflow' && github.ref == 'refs/heads/main' && github.run_attempt == 1 && vars.SITEFLOW_AWS_CD_READY == 'true'
+    # This is a deliberate non-resolving pin. Replace only after a reviewed
+    # signer commit exists; never replace with @main or a mutable tag.
+    uses: syucream02/siteflow/.github/workflows/siteflow-deploy.yml@0000000000000000000000000000000000000000
+    with:
+      ci_run_id: ${{ inputs.ci_run_id }}
+      operation: ${{ inputs.operation }}

@@ -1,0 +1,49 @@
+{
+  "liveEnabled": false,
+  "accountId": "REQUIRES_APPROVAL",
+  "region": "ap-southeast-2",
+  "instanceId": "REQUIRES_APPROVED_INSTANCE_ID",
+  "table": "SiteFlowRelease",
+  "trustedCiWorkflowHash": "REQUIRES_REVIEWED_CI_SHA256",
+  "operatorArnPrefix": "REQUIRES_SEPARATELY_APPROVED_OPERATOR_ROLE",
+  "documentName": "SiteFlow-ApprovedRelease",
+  "documentVersion": "REQUIRES_APPROVAL",
+  "documentSha256": "REQUIRES_APPROVAL",
+  "stateDirectory": "/srv/siteflow-mysql/release-aws",
+  "upstreamFile": "/etc/nginx/siteflow/upstream.inc",
+  "publicOrigin": "https://siteflow.example.invalid",
+  "policy": {
+    "repositoryId": "REQUIRES_VERIFICATION",
+    "signerSha": "REQUIRES_SIGNER_COMMIT",
+    "implementationSha": "REQUIRES_IMPLEMENTATION_COMMIT",
+    "manualProtectionReview": {
+      "confirmed": false,
+      "reviewer": "syucream02",
+      "repositoryId": "REQUIRES_VERIFICATION",
+      "environment": "production",
+      "bypassDisabled": false,
+      "reviewedAt": 0,
+      "expiresAt": 0
+    },
+    "allowedModes": [
+      "candidate"
+    ]
+  },
+  "verifier": {
+    "ghPath": "/usr/local/bin/gh",
+    "ghSha256": "REQUIRES_APPROVAL",
+    "trustedRootPath": "/usr/local/lib/siteflow/trust/trusted-root.jsonl",
+    "trustedRootSha256": "REQUIRES_APPROVAL",
+    "trustedRootReviewedAt": 0,
+    "verificationDirectory": "/srv/siteflow-mysql/release-aws"
+  },
+  "runtime": {
+    "runtimeEnvFile": "/srv/siteflow-mysql/config/app-runtime.env",
+    "databasePasswordFile": "/srv/siteflow-mysql/secrets/candidate/db-password",
+    "authSecretFile": "/srv/siteflow-mysql/secrets/candidate/auth-secret",
+    "caFile": "/srv/siteflow-mysql/tls/server/ca.pem",
+    "databaseHost": "mysql.siteflow.test",
+    "databaseName": "siteflow_public_app",
+    "network": "siteflow-production-database"
+  }
+}
