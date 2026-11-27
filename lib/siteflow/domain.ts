@@ -19,6 +19,44 @@ export function canCreateTeam(user: { emailVerified: boolean } | null): boolean 
   return user?.emailVerified === true;
 }
 
+export type TeamManagementInput = { expectedVersion: number } & (
+  | { action: 'rename'; name: string }
+  | { action: 'role'; role: 'admin' | 'member' }
+  | { action: 'invite'; email: string }
+  | { action: 'remove' | 'leave' | 'cancel' }
+);
+
+export const canonicalInvitationEmail = (email: string) => email.trim().toLowerCase();
+export function parseTeamManagementInput(action: string, value: unknown): TeamManagementInput | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const b = value as Record<string, unknown>;
+  if (!Number.isInteger(b.expectedVersion) || (b.expectedVersion as number) < 1 || (b.expectedVersion as number) >= 2147483647) return null;
+  const expectedVersion = b.expectedVersion as number;
+  if (action === 'rename') {
+    if (Object.keys(b).some(k => !['name', 'expectedVersion'].includes(k))) return null;
+    const parsed = parseCreateTeamInput({ name: b.name });
+    return parsed ? { action, expectedVersion, name: parsed.name } : null;
+  }
+  if (action === 'role') {
+    return Object.keys(b).length === 2 && (b.role === 'admin' || b.role === 'member')
+      ? { action, expectedVersion, role: b.role } : null;
+  }
+  if (action === 'invite') {
+    if (Object.keys(b).length !== 2 || typeof b.email !== 'string' || b.email.length > 254
+      || !/^[^\s@\u0000-\u001f\u007f]+@[^\s@\u0000-\u001f\u007f]+\.[^\s@\u0000-\u001f\u007f]+$/.test(b.email.trim())) return null;
+    return { action, expectedVersion, email: canonicalInvitationEmail(b.email) };
+  }
+  return ['remove', 'leave', 'cancel'].includes(action) && Object.keys(b).length === 1
+    ? { action: action as 'remove' | 'leave' | 'cancel', expectedVersion } : null;
+}
+
+export function invitationCanBeAccepted(value: { status: string; role: string | null; email: string; expiresAt: Date },
+  user: { email: string; emailVerified: boolean }, now: Date): boolean {
+  return user.emailVerified && value.status === 'pending' && value.role === 'member'
+    && canonicalInvitationEmail(user.email) === value.email && Number.isFinite(now.getTime())
+    && Number.isFinite(value.expiresAt.getTime()) && value.expiresAt.getTime() > now.getTime();
+}
+
 export interface CreateProjectInput {
   name: string;
   dueDate: string;
@@ -248,6 +286,54 @@ export function isUuid(value: string): boolean {
 
 export const meetingProjectLimit = 500;
 
+export type MeetingRecordAction = { expectedVersion: number; entryId: string } & (
+  | { action: 'save_notes'; consultation: string; decision: string }
+  | { action: 'create_action'; content: string; assigneeUserId: string; dueDate: string | null }
+  | { action: 'update_action'; actionId: string; itemVersion: number; content: string; assigneeUserId: string; dueDate: string | null; status: 'OPEN' | 'DONE' | 'CANCELLED' }
+  | { action: 'carry_action'; actionId: string; itemVersion: number; sourceSnapshotId: string; assigneeUserId: string }
+  | { action: 'refresh_action'; actionId: string; itemVersion: number }
+);
+
+export function parseMeetingRecordAction(value: unknown): MeetingRecordAction | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const b = value as Record<string, unknown>;
+  const version = (v: unknown) => typeof v === 'number' && Number.isInteger(v) && v > 0 && v < 2147483647;
+  const uuid = (v: unknown) => typeof v === 'string' && isUuid(v);
+  const text = (v: unknown, required: boolean) => typeof v === 'string' && (!required || v.trim().length > 0)
+    && Array.from(v.trim()).length <= 2000 && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(v);
+  if (!version(b.expectedVersion) || !uuid(b.entryId)) return null;
+  const keys = ['action', 'expectedVersion', 'entryId'];
+  switch (b.action) {
+    case 'save_notes':
+      keys.push('consultation', 'decision');
+      if (!text(b.consultation, false) || !text(b.decision, false)) return null;
+      break;
+    case 'create_action': case 'update_action':
+      keys.push('content', 'assigneeUserId', 'dueDate');
+      if (!text(b.content, true) || !uuid(b.assigneeUserId) || (b.dueDate !== null && (typeof b.dueDate !== 'string'
+        || !/^\d{4}-\d{2}-\d{2}$/.test(b.dueDate) || !Number.isFinite(Date.parse(b.dueDate))
+        || new Date(b.dueDate).toISOString().slice(0, 10) !== b.dueDate))) return null;
+      if (b.action === 'update_action') {
+        keys.push('actionId', 'itemVersion', 'status');
+        if (!uuid(b.actionId) || !version(b.itemVersion) || typeof b.status !== 'string' || !['OPEN', 'DONE', 'CANCELLED'].includes(b.status)) return null;
+      }
+      break;
+    case 'carry_action':
+      keys.push('actionId', 'itemVersion', 'sourceSnapshotId', 'assigneeUserId');
+      if (!uuid(b.actionId) || !version(b.itemVersion) || !uuid(b.sourceSnapshotId) || !uuid(b.assigneeUserId)) return null;
+      break;
+    case 'refresh_action':
+      keys.push('actionId', 'itemVersion');
+      if (!uuid(b.actionId) || !version(b.itemVersion)) return null;
+      break;
+    default: return null;
+  }
+  if (Object.keys(b).some(key => !keys.includes(key))) return null;
+  return Object.fromEntries(Object.entries(b).map(([key, v]) => [key,
+    ['content', 'consultation', 'decision'].includes(key) ? (v as string).trim()
+      : ['entryId', 'actionId', 'sourceSnapshotId', 'assigneeUserId'].includes(key) ? (v as string).toLowerCase() : v])) as MeetingRecordAction;
+}
+
 type MeetingProgressValue = { progress: number; status: ProjectStatus };
 
 // 会議の確認値は履歴。終了後は現在の案件値で過去の比較を書き換えない。
@@ -319,6 +405,52 @@ export function parseListPageQuery(input: { limit?: string; cursor?: string }): 
   if (!Number.isInteger(limit) || limit < 1 || limit > 50) return null;
   if (input.cursor !== undefined && !isUuid(input.cursor)) return null;
   return { limit, ...(input.cursor === undefined ? {} : { cursor: input.cursor.toLowerCase() }) };
+}
+
+export const projectSearchKeys = ['q', 'primaryUserId', 'supportUserId', 'status', 'progressMin', 'progressMax'] as const;
+const projectSearchTrackingKeys = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'utm_id', 'utm_source_platform', 'utm_creative_format', 'utm_marketing_tactic'];
+
+export function withoutKnownTrackingParameters(params: URLSearchParams): URLSearchParams {
+  const businessParams = new URLSearchParams(params);
+  for (const key of projectSearchTrackingKeys) businessParams.delete(key);
+  return businessParams;
+}
+
+export type ProjectSearchQuery = ReturnType<typeof parseListPageQuery> & {
+  q?: string; primaryUserId?: string; supportUserId?: string; status?: ProjectStatus;
+  progressMin?: number; progressMax?: number;
+};
+
+// 一覧専用。履歴・メンバー一覧の受付条件は広げない。
+export function parseProjectSearchQuery(params: URLSearchParams): ProjectSearchQuery | null {
+  if (Array.from(params.keys()).some(key => ![...projectSearchKeys, 'limit', 'cursor'].includes(key)
+    || params.getAll(key).length !== 1)) return null;
+  const page = parseListPageQuery({ limit: params.get('limit') ?? undefined, cursor: params.get('cursor') ?? undefined });
+  if (!page) return null;
+  const query: NonNullable<ProjectSearchQuery> = { ...page };
+  if (params.has('q')) {
+    const q = params.get('q')!;
+    if (/[\u0000-\u001f\u007f]/.test(q) || Array.from(q).length > 100) return null;
+    if (q.trim()) query.q = q.trim();
+  }
+  for (const key of ['primaryUserId', 'supportUserId'] as const) {
+    const value = params.get(key);
+    if (value !== null) { if (!isUuid(value)) return null; query[key] = value.toLowerCase(); }
+  }
+  const status = params.get('status');
+  if (status !== null) {
+    if (!projectStatuses.some(value => value === status)) return null;
+    query.status = status as ProjectStatus;
+  }
+  for (const key of ['progressMin', 'progressMax'] as const) {
+    const value = params.get(key);
+    if (value !== null) {
+      if (!/^(0|[1-9][0-9]?|100)$/.test(value)) return null;
+      query[key] = Number(value);
+    }
+  }
+  if ((query.progressMin ?? 0) > (query.progressMax ?? 100)) return null;
+  return query;
 }
 
 // チーム情報・案件と関連情報を読む許可。案件編集・所属管理の許可には流用しない。

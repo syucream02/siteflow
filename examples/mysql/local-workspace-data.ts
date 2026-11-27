@@ -23,7 +23,15 @@ export async function createLocalWorkspaceData(prisma: PrismaClient) {
 
 export async function removeLocalWorkspaceData(prisma: PrismaClient, data: { userId: string; teamIds: string[] }) {
   await prisma.$transaction(async tx => {
+    await tx.invitation.deleteMany({ where: { teamId: { in: data.teamIds } } });
     await tx.meetingConfirmation.deleteMany({ where: { teamId: { in: data.teamIds } } });
+    // Only this fixture's teams. Delete handover leaves before their source snapshots.
+    while (await tx.meetingActionSnapshot.count({ where: { teamId: { in: data.teamIds } } })) {
+      const deleted = await tx.meetingActionSnapshot.deleteMany({ where: { teamId: { in: data.teamIds }, carriedTo: { none: {} } } });
+      if (!deleted.count) throw new Error('Fixture snapshot dependency could not be removed safely');
+    }
+    await tx.meetingActionItem.deleteMany({ where: { teamId: { in: data.teamIds } } });
+    await tx.meetingProjectNote.deleteMany({ where: { teamId: { in: data.teamIds } } });
     await tx.meetingProject.deleteMany({ where: { teamId: { in: data.teamIds } } });
     await tx.meeting.deleteMany({ where: { teamId: { in: data.teamIds } } });
     await tx.projectAssignmentHistory.deleteMany({ where: { teamId: { in: data.teamIds } } });

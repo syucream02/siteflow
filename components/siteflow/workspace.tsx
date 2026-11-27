@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useSyncExternalStore, type FormEvent } from "react";
+import Link from "next/link";
 import { Building2, MapPin, Plus, ClipboardList, CalendarDays, CheckCheck, CircleAlert, ChevronRight, HardHat, UserRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
@@ -83,7 +84,7 @@ export function Workspace() {
 
   return <div className="workspace">
     <a href="#main" className="skip-link">本文へ移動</a>
-    <header className="topbar"><div className="brand"><span className="brand-icon"><HardHat size={23} /></span>SiteFlow<span className="brand-caption">FIELD OPERATIONS</span></div><div className="topbar-right"><span className="demo-pill">デモワークスペース</span><span className="avatar">山</span></div></header>
+    <header className="topbar"><Link href="/" className="brand" style={{ color: "inherit", textDecoration: "none" }} aria-label="SiteFlowトップページへ"><span className="brand-icon"><HardHat size={23} /></span>SiteFlow<span className="brand-caption">FIELD OPERATIONS</span></Link><div className="topbar-right"><span className="demo-pill">一部機能の体験版</span><Link href="/" style={{ color: "inherit", fontSize: 13 }}>トップへ戻る</Link></div></header>
     <main id="main" className="main-shell">
       <div className="page-heading"><div><p className="eyebrow">PROJECT WORKSPACE</p><h1>プロジェクト管理</h1><p className="subtitle">現場の気づきを、確実な対応へ。</p></div><div className="workspace-name"><Building2 size={18} /> 青葉調査チーム</div></div>
       <Tabs value={view} onValueChange={setView} className="workspace-tabs"><TabsList variant="line" className="workspace-tab-list"><TabsTrigger value="issues"><ClipboardList size={17} />案件の指摘事項</TabsTrigger><TabsTrigger value="projects"><Building2 size={17} />プロジェクト一覧</TabsTrigger></TabsList>

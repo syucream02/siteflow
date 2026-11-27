@@ -1,6 +1,6 @@
 // ローカル検証専用DBへ適用し、Next.js統合APIと本体ワークスペースへ接続済み。本番未適用。
 // 現在のアクセス権はTeamMembership、履歴用の人物記録はTeamParticipantに分離。
-// 進捗は0〜100の整数。会議は全件確認の開始・確認・取消・再開・終了まで。差分/決定事項は未実装。
+// 進捗は0〜100の整数。会議の全件確認に加え、相談・決定事項・対応事項と会議時点の記録を保持する。
 generator client {
   provider            = "prisma-client"
   output              = "../../examples/mysql/generated/integrated"
@@ -101,6 +101,7 @@ model Verification {
 
 model Team {
   id              String            @id
+  version         Int               @default(1)
   name            String            @db.Text
   slug            String
   logo            String?           @db.Text
@@ -170,6 +171,13 @@ model TeamParticipant {
   createdMeetings Meeting[] @relation("MeetingCreator")
   confirmations MeetingConfirmation[] @relation("MeetingConfirmer")
   revokedConfirmations MeetingConfirmation[] @relation("MeetingRevoker")
+  createdMeetingNotes MeetingProjectNote[] @relation("NoteCreator")
+  updatedMeetingNotes MeetingProjectNote[] @relation("NoteUpdater")
+  assignedActions MeetingActionItem[] @relation("ActionAssignee")
+  createdActions MeetingActionItem[] @relation("ActionCreator")
+  updatedActions MeetingActionItem[] @relation("ActionUpdater")
+  actionSnapshots MeetingActionSnapshot[] @relation("SnapshotAssignee")
+  recordedActionSnapshots MeetingActionSnapshot[] @relation("SnapshotRecorder")
 
   @@unique([teamId, userId])
   @@unique([teamId, id])
@@ -201,6 +209,7 @@ model Project {
   createdByParticipant TeamParticipant @relation("ProjectCreatorParticipant", fields: [teamId, createdByParticipantId], references: [teamId, id], onDelete: Restrict, onUpdate: Restrict)
 
   supportMembers    ProjectSupportMember[]
+  actionItems       MeetingActionItem[]
   progressHistory   ProjectProgressHistory[]
   assignmentHistory ProjectAssignmentHistory[]
   meetingEntries MeetingProject[]
@@ -248,7 +257,7 @@ model ProjectProgressHistory {
 }
 
 // 分離APIで登録時/担当変更時の履歴を一括保存。履歴自体の更新・削除APIは公開しない。
-// DB管理者の直接操作まで防ぐ改ざん対策や、本体画面への接続は未実装。
+// DB管理者の直接操作まで防ぐ改ざん対策は未実装。
 model ProjectAssignmentHistory {
   id                     String               @id @default(uuid())
   teamId                 String
@@ -302,10 +311,92 @@ model MeetingProject {
   meeting Meeting @relation(fields: [teamId, meetingId], references: [teamId, id], onDelete: Restrict, onUpdate: Restrict)
   project Project @relation(fields: [teamId, projectId], references: [teamId, id], onDelete: Restrict, onUpdate: Restrict)
   confirmations MeetingConfirmation[]
+  note MeetingProjectNote?
+  originatedActions MeetingActionItem[] @relation("ActionOrigin")
+  actionSnapshots MeetingActionSnapshot[]
   @@unique([teamId, id])
+  @@unique([teamId, projectId, id])
   @@unique([meetingId, projectId])
   @@unique([meetingId, position])
   @@index([teamId, projectId])
+}
+
+enum MeetingActionStatus {
+  OPEN
+  DONE
+  CANCELLED
+}
+
+model MeetingProjectNote {
+  id String @id @default(uuid()) @db.VarChar(36)
+  teamId String
+  entryId String @db.VarChar(36)
+  consultation String @db.Text
+  decision String @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  createdByParticipantId String
+  createdByNameSnapshot String @db.Text
+  updatedByParticipantId String
+  updatedByNameSnapshot String @db.Text
+  entry MeetingProject @relation(fields: [teamId, entryId], references: [teamId, id], onDelete: Restrict, onUpdate: Restrict)
+  createdBy TeamParticipant @relation("NoteCreator", fields: [teamId, createdByParticipantId], references: [teamId, id], onDelete: Restrict, onUpdate: Restrict)
+  updatedBy TeamParticipant @relation("NoteUpdater", fields: [teamId, updatedByParticipantId], references: [teamId, id], onDelete: Restrict, onUpdate: Restrict)
+  @@unique([teamId, entryId])
+}
+
+model MeetingActionItem {
+  id String @id @default(uuid()) @db.VarChar(36)
+  teamId String
+  projectId String
+  originEntryId String @db.VarChar(36)
+  content String @db.Text
+  assigneeParticipantId String
+  assigneeNameSnapshot String @db.Text
+  dueDate DateTime? @db.Date
+  status MeetingActionStatus @default(OPEN)
+  version Int @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  createdByParticipantId String
+  createdByNameSnapshot String @db.Text
+  updatedByParticipantId String
+  updatedByNameSnapshot String @db.Text
+  project Project @relation(fields: [teamId, projectId], references: [teamId, id], onDelete: Restrict, onUpdate: Restrict)
+  originEntry MeetingProject @relation("ActionOrigin", fields: [teamId, projectId, originEntryId], references: [teamId, projectId, id], onDelete: Restrict, onUpdate: Restrict)
+  assignee TeamParticipant @relation("ActionAssignee", fields: [teamId, assigneeParticipantId], references: [teamId, id], onDelete: Restrict, onUpdate: Restrict)
+  createdBy TeamParticipant @relation("ActionCreator", fields: [teamId, createdByParticipantId], references: [teamId, id], onDelete: Restrict, onUpdate: Restrict)
+  updatedBy TeamParticipant @relation("ActionUpdater", fields: [teamId, updatedByParticipantId], references: [teamId, id], onDelete: Restrict, onUpdate: Restrict)
+  snapshots MeetingActionSnapshot[]
+  @@unique([teamId, projectId, id])
+  @@index([teamId, projectId, status, id])
+}
+
+model MeetingActionSnapshot {
+  id String @id @default(uuid()) @db.VarChar(36)
+  teamId String
+  projectId String
+  entryId String @db.VarChar(36)
+  actionId String @db.VarChar(36)
+  sourceSnapshotId String? @db.VarChar(36)
+  content String @db.Text
+  assigneeParticipantId String
+  assigneeNameSnapshot String @db.Text
+  dueDate DateTime? @db.Date
+  status MeetingActionStatus
+  actionVersion Int
+  recordedAt DateTime @default(now())
+  recordedByParticipantId String
+  recordedByNameSnapshot String @db.Text
+  entry MeetingProject @relation(fields: [teamId, projectId, entryId], references: [teamId, projectId, id], onDelete: Restrict, onUpdate: Restrict)
+  action MeetingActionItem @relation(fields: [teamId, projectId, actionId], references: [teamId, projectId, id], onDelete: Restrict, onUpdate: Restrict)
+  assignee TeamParticipant @relation("SnapshotAssignee", fields: [teamId, assigneeParticipantId], references: [teamId, id], onDelete: Restrict, onUpdate: Restrict)
+  recordedBy TeamParticipant @relation("SnapshotRecorder", fields: [teamId, recordedByParticipantId], references: [teamId, id], onDelete: Restrict, onUpdate: Restrict)
+  source MeetingActionSnapshot? @relation("SnapshotSource", fields: [teamId, projectId, actionId, sourceSnapshotId], references: [teamId, projectId, actionId, id], onDelete: Restrict, onUpdate: Restrict)
+  carriedTo MeetingActionSnapshot[] @relation("SnapshotSource")
+  @@unique([teamId, entryId, actionId])
+  @@unique([teamId, projectId, actionId, id])
+  @@index([teamId, entryId, id])
 }
 
 model MeetingConfirmation {

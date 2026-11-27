@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { PrismaClient } from "./generated/integrated/client.ts";
-import { canReadTeam, canArchiveProject, isUuid, parseChangeProjectAssigneesInput, parseEditProjectInput, parseCreateProjectInput, parseCreateTeamInput, parseListPageQuery } from "../../lib/siteflow/domain.ts";
+import { canReadTeam, canArchiveProject, isUuid, parseChangeProjectAssigneesInput, parseEditProjectInput, parseCreateProjectInput, parseCreateTeamInput, parseListPageQuery, parseProjectSearchQuery } from "../../lib/siteflow/domain.ts";
 import { createTeamForUser } from "./team-service.ts";
 import { changeProjectAssigneesForUser, createProjectForUser, editProjectForUser } from "./project-service.ts";
 import { readJsonBody } from "./json-body.ts";
@@ -12,6 +12,11 @@ import { parseProjectArchiveInput } from "../../lib/siteflow/domain.ts";
 import { changeProjectArchiveForUser } from "./project-archive-service.ts";
 import { parseMeetingAction, parseStartMeetingInput } from '../../lib/siteflow/domain.ts';
 import { actOnMeetingForUser, readMeetingForUser, startMeetingForUser } from './meeting-service.ts';
+import { parseMeetingRecordAction } from '../../lib/siteflow/domain.ts';
+import { readMeetingRecords, saveMeetingRecord } from './meeting-record-service.ts';
+
+import { searchProjects } from './project-search.ts';
+import { handleTeamManagement, matchTeamManagement } from './team-management-handler.ts';
 
 type ApiDependencies = {
   prisma: PrismaClient;
@@ -44,6 +49,7 @@ export function createWebApiHandler({ prisma, origin, host, authHandler, getSess
       const url = new URL(req.url ?? "/", origin);
       if (!url.pathname.startsWith(pathPrefix + "/")) return error(404, "NOT_FOUND");
       const pathname = "/api" + url.pathname.slice(pathPrefix.length);
+      const management = matchTeamManagement(pathname);
       const teamRoute = /^\/api\/teams\/([^/]+)\/(access|projects|members|archived-projects)$/.exec(pathname);
       const detailRoute = /^\/api\/teams\/([^/]+)\/projects\/([^/]+)$/.exec(pathname);
       const archivedDetailRoute = /^\/api\/teams\/([^/]+)\/archived-projects\/([^/]+)$/.exec(pathname);
@@ -55,19 +61,26 @@ export function createWebApiHandler({ prisma, origin, host, authHandler, getSess
       const statusRoute = /^\/api\/teams\/([^/]+)\/projects\/([^/]+)\/status$/.exec(pathname);
       const archiveRoute = /^\/api\/teams\/([^/]+)\/projects\/([^/]+)\/(archive|restore)$/.exec(pathname);
       const meetingRoute = /^\/api\/teams\/([^/]+)\/meetings(?:\/([^/]+))?$/.exec(pathname);
-      const scopedRoute = teamRoute ?? detailRoute ?? archivedDetailRoute ?? supportRoute ?? progressRoute ?? assignmentRoute ?? assigneesRoute ?? progressUpdateRoute ?? statusRoute ?? archiveRoute ?? meetingRoute;
+      const recordsRoute = /^\/api\/teams\/([^/]+)\/meetings\/([^/]+)\/entries\/([^/]+)\/(records|carry-candidates)$/.exec(pathname);
+      const scopedRoute = teamRoute ?? detailRoute ?? archivedDetailRoute ?? supportRoute ?? progressRoute ?? assignmentRoute ?? assigneesRoute ?? progressUpdateRoute ?? statusRoute ?? archiveRoute ?? meetingRoute ?? recordsRoute;
       const isTeams = pathname === "/api/teams";
       const allowsPost = isTeams || teamRoute?.[2] === "projects" || Boolean(meetingRoute && !meetingRoute[2]);
-      const method = meetingRoute?.[2] ? (req.method === 'PATCH' ? 'PATCH' : 'GET') : archiveRoute ? "POST" : statusRoute || progressUpdateRoute ? "PATCH" : assigneesRoute ? "PUT" : detailRoute && req.method === "PATCH" ? "PATCH" : allowsPost ? (req.method === "POST" ? "POST" : "GET") : scopedRoute ? "GET" : methods.get(pathname);
+      const method = management ? (management.methods.includes(req.method) ? req.method : management.methods[0]) : meetingRoute?.[2] ? (req.method === 'PATCH' ? 'PATCH' : 'GET') : archiveRoute ? "POST" : statusRoute || progressUpdateRoute ? "PATCH" : assigneesRoute ? "PUT" : detailRoute && req.method === "PATCH" ? "PATCH" : allowsPost ? (req.method === "POST" ? "POST" : "GET") : scopedRoute ? "GET" : methods.get(pathname);
       if (!method) { return error(404, "NOT_FOUND"); }
       if (req.method !== method) {
-        headers.set("Allow", detailRoute || meetingRoute?.[2] ? "GET, PATCH" : allowsPost ? "GET, POST" : method);
+        headers.set("Allow", management ? management.methods.join(', ') : detailRoute || meetingRoute?.[2] ? "GET, PATCH" : allowsPost ? "GET, POST" : method);
         return error(405, "METHOD_NOT_ALLOWED");
       }
       if ((method !== "GET" && req.headers.get("origin") !== origin)
         || (req.headers.has("origin") && req.headers.get("origin") !== origin)
         || req.headers.get("sec-fetch-site") === "cross-site") {
         return error(403, "INVALID_ORIGIN");
+      }
+      if (management) {
+        const session = await getSession(req.headers);
+        if (!session) return error(401, 'UNAUTHENTICATED');
+        const result = await handleTeamManagement(prisma, session.user.id, management, req, url);
+        return result.ok ? reply(200, result) : reply(result.status, result);
       }
       if (isTeams) {
         const session = await getSession(req.headers);
@@ -124,16 +137,29 @@ export function createWebApiHandler({ prisma, origin, host, authHandler, getSess
           // 存在しないチームも同じ応答とし、他チームの有無を知らせない。
           return error(403, "TEAM_ACCESS_DENIED", "このチームへのアクセスは許可されていません。");
         }
+        if (recordsRoute) {
+          if (!isUuid(recordsRoute[2]) || !isUuid(recordsRoute[3])) return error(400, 'INVALID_MEETING_ID');
+          if (Array.from(url.searchParams.keys()).some(key => !['cursor', 'limit'].includes(key) || url.searchParams.getAll(key).length !== 1)) return error(400, 'INVALID_MEETING_QUERY');
+          const page = parseListPageQuery({ cursor: url.searchParams.get('cursor') ?? undefined, limit: url.searchParams.get('limit') ?? undefined });
+          if (!page) return error(400, 'INVALID_MEETING_QUERY');
+          const result = await readMeetingRecords(prisma, session.user.id, teamId, recordsRoute[2].toLowerCase(), recordsRoute[3].toLowerCase(), page, recordsRoute[4] === 'carry-candidates');
+          return result.ok ? reply(200, result) : error(result.status, result.code, result.message);
+        }
         if (meetingRoute) {
           const meetingId = meetingRoute[2]?.toLowerCase();
           if (meetingId && !isUuid(meetingId)) return error(400, 'INVALID_MEETING_ID');
           if (method !== 'GET') {
             if (url.searchParams.size) return error(400, 'INVALID_MEETING_QUERY');
             if (req.headers.get('content-type')?.split(';')[0].trim().toLowerCase() !== 'application/json') return error(415, 'UNSUPPORTED_MEDIA_TYPE');
-            const body = await readJsonBody(req, 4096);
+            const body = await readJsonBody(req, 32768);
             if (body.tooLarge) return error(413, 'BODY_TOO_LARGE');
             if (body.invalid) return error(400, 'INVALID_MEETING_INPUT');
             if (meetingId) {
+              const recordInput = parseMeetingRecordAction(body.value);
+              if (recordInput) {
+                const result = await saveMeetingRecord(prisma, session.user.id, teamId, meetingId, recordInput);
+                return result.ok ? reply(200, result) : error(result.status, result.code, result.message);
+              }
               const input = parseMeetingAction(body.value);
               if (!input) return error(400, 'INVALID_MEETING_INPUT', '操作と会議の版番号を確認してください。');
               const result = await actOnMeetingForUser(prisma, session.user.id, teamId, meetingId, input);
@@ -386,34 +412,11 @@ export function createWebApiHandler({ prisma, origin, host, authHandler, getSess
         }
         if (teamRoute?.[2] === "projects" || teamRoute?.[2] === "archived-projects") {
           const archivedOnly = teamRoute[2] === "archived-projects";
-          const archivedAt = archivedOnly ? { not: null } : null;
-          const params = url.searchParams;
-          const query = parseListPageQuery({ limit: params.get("limit") ?? undefined, cursor: params.get("cursor") ?? undefined });
-          if (!query || Array.from(params.keys()).some(key => !["limit", "cursor"].includes(key) || params.getAll(key).length !== 1)) {
-            return error(400, "INVALID_PROJECT_QUERY", "limitは1〜50、cursorは前の応答のnextCursorを1つ指定してください。");
-          }
-          // カーソルも、対象チームの取得中の一覧（通常/保管）にある案件に限定する。
-          const cursor = query.cursor ? await prisma.project.findFirst({
-            where: { id: query.cursor, teamId, archivedAt }, select: { id: true, dueDate: true },
-          }) : null;
-          if (query.cursor && !cursor) {
-            return error(400, "INVALID_PROJECT_CURSOR", "続きの目印が使えません。cursorを外して最初から取得してください。");
-          }
-          const rows = await prisma.project.findMany({
-            where: {
-              teamId, archivedAt,
-              // 実際に案件を読むクエリも、現在の所属で絞る。
-              team: { teammemberships: { some: { userId: session.user.id, role: { in: ["admin", "member"] } } } },
-              ...(cursor ? { OR: [{ dueDate: { gt: cursor.dueDate } }, { dueDate: cursor.dueDate, id: { gt: cursor.id } }] } : {}),
-            },
-            orderBy: [{ dueDate: "asc" }, { id: "asc" }],
-            take: query.limit + 1,
-            select: {
-              id: true, name: true, code: true, dueDate: true, progress: true, status: true,
-              archivedAt: true, version: true,
-              primaryParticipant: { select: { id: true, user: { select: { name: true } } } },
-            },
-          });
+          const query = parseProjectSearchQuery(url.searchParams);
+          if (!query) return error(400, 'INVALID_PROJECT_QUERY');
+          const result = await searchProjects(prisma, session.user.id, teamId, archivedOnly, query);
+          if (!result.ok) return error(400, 'INVALID_PROJECT_CURSOR');
+          const { rows, total, collectionTotal } = result;
           const hasMore = rows.length > query.limit;
           const items = rows.slice(0, query.limit).map(row => ({
             id: row.id, name: row.name, code: row.code, dueDate: row.dueDate.toISOString().slice(0, 10),
@@ -421,7 +424,7 @@ export function createWebApiHandler({ prisma, origin, host, authHandler, getSess
             primaryAssignee: { participantId: row.primaryParticipant.id, name: row.primaryParticipant.user.name },
             ...(archivedOnly ? { archivedAt: row.archivedAt!.toISOString(), version: row.version } : {}),
           }));
-          return reply(200, { items, page: { limit: query.limit, hasMore, nextCursor: hasMore ? items[items.length - 1].id : null } });
+          return reply(200, { items, total, collectionTotal, page: { limit: query.limit, hasMore, nextCursor: hasMore ? items[items.length - 1].id : null } });
         }
         return reply(200, { team: membership.team, role: membership.role });
       }

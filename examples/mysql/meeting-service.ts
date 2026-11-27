@@ -6,7 +6,7 @@ const denied = () => ({ ok: false as const, status: 403, code: 'MEETING_ACCESS_D
 const missing = () => ({ ok: false as const, status: 404, code: 'MEETING_NOT_FOUND', message: '会議が見つかりません。' });
 const conflict = () => ({ ok: false as const, status: 409, code: 'MEETING_VERSION_CONFLICT', message: '会議が更新されています。最新の状態を取得し、確認してからもう一度操作してください。' });
 
-async function lockMembership(tx: Prisma.TransactionClient, userId: string, teamId: string, otherUserId?: string | null) {
+export async function lockMembership(tx: Prisma.TransactionClient, userId: string, teamId: string, otherUserId?: string | null) {
   const ids = [...new Set([userId, ...(otherUserId ? [otherUserId] : [])])].sort();
   return tx.$queryRaw<{ teamId: string; userId: string; role: string }[]>(Prisma.sql`
     SELECT teamId, userId, role FROM TeamMembership WHERE teamId=${teamId}
@@ -35,7 +35,7 @@ export async function startMeetingForUser(prisma: PrismaClient, userId: string, 
     await tx.meetingProject.createMany({ data: projects.map((project, position) => ({ id: randomUUID(), teamId, meetingId: meeting.id,
       projectId: project.id, position, nameSnapshot: project.name })) });
     return { ok: true as const, meeting };
-  });
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
 }
 
 export async function readMeetingForUser(prisma: PrismaClient, userId: string, teamId: string, meetingId: string) {
@@ -92,7 +92,7 @@ export async function readMeetingForUser(prisma: PrismaClient, userId: string, t
         noPrevious: entries.filter(entry => !entry.previousConfirmation).length,
         unconfirmed: entries.filter(entry => entry.comparison.source === 'unconfirmed').length,
       }, entries } };
-  });
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
 }
 
 export async function actOnMeetingForUser(prisma: PrismaClient, userId: string, teamId: string, meetingId: string, input: MeetingAction) {
@@ -112,6 +112,18 @@ export async function actOnMeetingForUser(prisma: PrismaClient, userId: string, 
     if (input.action === 'finish' && !input.allowUnconfirmed) {
       const remaining = await tx.meetingProject.count({ where: { teamId, meetingId, confirmations: { none: { revokedAt: null } } } });
       if (remaining) return { ok: false as const, status: 409, code: 'UNCONFIRMED_PROJECTS', message: `未確認の案件が${remaining}件あります。一覧を確認してから終了してください。` };
+    }
+    if (input.action === 'finish') {
+      // Canonical action rows serialize finish with updates from other active meetings.
+      const ids = await tx.meetingActionSnapshot.findMany({ where: { teamId, entry: { meetingId } }, select: { actionId: true } });
+      if (ids.length) {
+        await tx.$queryRaw(Prisma.sql`SELECT id FROM MeetingActionItem WHERE teamId=${teamId} AND id IN (${Prisma.join(ids.map(row => row.actionId).sort())}) ORDER BY id FOR UPDATE`);
+        const stale = await tx.$queryRaw<{ id: string }[]>(Prisma.sql`SELECT s.id FROM MeetingActionSnapshot s
+          JOIN MeetingProject e ON e.teamId=s.teamId AND e.id=s.entryId
+          JOIN MeetingActionItem a ON a.teamId=s.teamId AND a.id=s.actionId
+          WHERE s.teamId=${teamId} AND e.meetingId=${meetingId} AND s.actionVersion<>a.version LIMIT 1`);
+        if (stale.length) return { ok: false as const, status: 409, code: 'ACTION_REVIEW_REQUIRED', message: '別の会議で更新された対応事項があります。各案件で最新の対応事項を確認してから終了してください。' };
+      }
     }
     const actor = await tx.teamParticipant.upsert({ where: { teamId_userId: { teamId, userId } }, create: { teamId, userId }, update: {}, select: { id: true, user: { select: { name: true } } } });
     let facilitatorParticipantId: string | null | undefined;
@@ -140,5 +152,5 @@ export async function actOnMeetingForUser(prisma: PrismaClient, userId: string, 
     } });
     if (saved.count !== 1) throw new Error('Locked meeting update failed');
     return { ok: true as const, meeting: { id: meetingId, version: meeting.version + 1 }, changed: true };
-  });
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
 }

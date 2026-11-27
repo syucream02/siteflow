@@ -583,7 +583,7 @@ describe("専用DBとHTTP経由でログインの土台を検証する", {
   it("所属チームに案件が0件なら空配列と続きなしを返す", async () => {
     const response = await listProjects(emptyTeamId);
     assert.equal(response.status, 200);
-    assert.deepEqual(await response.json(), { items: [], page: { limit: 20, hasMore: false, nextCursor: null } });
+    assert.deepEqual(await response.json(), { items: [], total: 0, collectionTotal: 0, page: { limit: 20, hasMore: false, nextCursor: null } });
   });
   it("別チームは403、別チーム・アーカイブ・不明な案件のカーソルは同じ400になる", async () => {
     assert.equal((await listProjects(teams[1], `?cursor=${projects[0].id}`)).status, 403);
@@ -670,7 +670,7 @@ describe("専用DBとHTTP経由でログインの土台を検証する", {
     assert.match(body.team.id, /^[a-f0-9-]{36}$/);
     assert.equal(response.headers.get("location"), `/api/teams/${body.team.id}/access`);
     assert.equal((await readTeam(body.team.id)).status, 200);
-    assert.deepEqual(await (await listProjects(body.team.id)).json(), { items: [], page: { limit: 20, hasMore: false, nextCursor: null } });
+    assert.deepEqual(await (await listProjects(body.team.id)).json(), { items: [], total: 0, collectionTotal: 0, page: { limit: 20, hasMore: false, nextCursor: null } });
     const membership = await api.prisma.teamMembership.findMany({ where: { teamId: body.team.id } });
     assert.equal(membership.length, 1);assert.equal(membership[0].userId, ids[0]);assert.equal(membership[0].role, "admin");
     const team = await api.prisma.team.findUnique({ where: { id: body.team.id } });
@@ -1592,11 +1592,10 @@ describe("専用DBとHTTP経由でログインの土台を検証する", {
   it("公開用中継を実APIへつなぎ、Secure Cookieでログイン・取得・ログアウトする", async () => {
     const { startApiServer } = await import('../examples/mysql/api-server.ts');
     const { proxyPublicApi } = await import('../lib/siteflow/public-api-proxy.ts');
-    const { readSchemaCheckSettings } = await import('../examples/mysql/schema-check-settings.mjs');
+    const { readSchemaCheckConnectionOptions } = await import('../examples/mysql/schema-check-settings.mjs');
     const fromExample = createRequire(new URL('../examples/mysql/package.json', import.meta.url));
     const { PrismaMariaDb } = await import(pathToFileURL(fromExample.resolve('@prisma/adapter-mariadb')).href);
-    const settings = readSchemaCheckSettings();
-    const prisma = new api.prisma.constructor({ adapter: new PrismaMariaDb({ host: '127.0.0.1', port: settings.port, user: settings.user, password: settings.password, database: settings.database, connectionLimit: 2 }) });
+    const prisma = new api.prisma.constructor({ adapter: new PrismaMariaDb({ ...readSchemaCheckConnectionOptions(), connectionLimit: 2 }) });
     const previous = await api.prisma.session.findMany({ where: { userId: ids[0] }, select: { id: true } });
     const publicOrigin = 'https://demo.example.com'; let publicApi;
     try {

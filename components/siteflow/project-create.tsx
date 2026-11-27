@@ -2,8 +2,9 @@
 
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { parseCreateProjectInput } from '@/lib/siteflow/domain';
-import { ApiError, message, request, type Page, type Resource } from './workspace-api';
+import { ApiError, message, request, resultUnknown, type Page, type Resource } from './workspace-api';
 import styles from './connected-workspace.module.css';
+import { confirmNavigation, useDraftGuard } from './draft-guard';
 
 type Member = { userId: string; name: string; role: string };
 type Draft = { name: string; dueDate: string; code: string; clientName: string; summary: string; notes: string };
@@ -21,6 +22,8 @@ export function ProjectCreate({ teamId, signedOut, created, cancel, savingChange
   const [uncertain, setUncertain] = useState(false); const [confirmed, setConfirmed] = useState(false);
   const active = useRef(true); const moreController = useRef<AbortController | null>(null);
   const callbacks = useRef({ signedOut, created, savingChanged });
+  const dirty = Object.values(draft).some(Boolean) || Boolean(primary) || supports.length > 0;
+  const releaseGuard = useDraftGuard(dirty || uncertain, busy, () => { setDraft(empty); setPrimary(''); setSupports([]); });
   useEffect(() => { callbacks.current = { signedOut, created, savingChanged }; }, [signedOut, created, savingChanged]);
   const heading = useRef<HTMLHeadingElement>(null);
   const errorText = useRef<HTMLParagraphElement>(null);
@@ -69,12 +72,12 @@ export function ProjectCreate({ teamId, signedOut, created, cancel, savingChange
       // POSTは自動再送しない。保存結果が不明な場合は一覧確認を促す。
       const result = await request<{ project: { id: string } }>(`teams/${teamId}/projects`, undefined, input);
       if (!result.project?.id) throw new Error('登録結果を確認できませんでした。');
-      if (active.current) callbacks.current.created(result.project.id);
+      if (active.current) { releaseGuard(); callbacks.current.created(result.project.id); }
     } catch (error) {
       if (!active.current) return;
       if (error instanceof ApiError && error.status === 401) callbacks.current.signedOut();
       else {
-        const unknownResult = !(error instanceof ApiError) || error.status >= 500;
+        const unknownResult = resultUnknown(error);
         setUncertain(unknownResult); setConfirmed(false);
         setError(unknownResult ? '登録結果を確認できません。保存済みの可能性があります。同じチームの一覧を別タブで確認し、未登録の場合だけ再送してください。入力は保持しています。' : message(error));
       }
@@ -91,7 +94,7 @@ export function ProjectCreate({ teamId, signedOut, created, cancel, savingChange
   return <section className={styles.projectPanel} aria-labelledby="create-title" data-project-create>
     <div className={styles.panelHeading}><div><p className={styles.eyebrow}>NEW PROJECT</p><h2 id="create-title" ref={heading} tabIndex={-1}>案件を登録</h2></div></div>
     <form onSubmit={submit} className={styles.createForm} aria-busy={busy}>
-      <p className={styles.help}>必須項目を入力してください。未着手・進捗0％で登録されます。チーム切替・画面移動では入力を破棄します。</p>
+      <p className={styles.help}>必須項目を入力してください。未着手・進捗0％で登録されます。{busy ? '保存中です。' : uncertain ? '保存結果は不明です。確認するまで再送しないでください。' : error ? '保存できませんでした。入力を確認してください。' : dirty ? '未保存の入力があります。' : '未変更です。'}</p>
       <fieldset disabled={busy} className={styles.createFields}><legend>基本情報</legend>
         <label htmlFor="project-name">案件名（必須・200文字以内）</label><input id="project-name" required maxLength={200} value={draft.name} onChange={event => update('name', event.target.value)} />
         <label htmlFor="project-due">納期（必須）</label><input id="project-due" type="date" required min="1000-01-01" max="9999-12-31" value={draft.dueDate} onChange={event => update('dueDate', event.target.value)} />
@@ -119,8 +122,8 @@ export function ProjectCreate({ teamId, signedOut, created, cancel, savingChange
         </>}
       </fieldset>
       {error && <p className={styles.error} role="alert" ref={errorText} tabIndex={-1}>{error}</p>}
-      {uncertain && <div className={styles.uncertain}><a href="/workspace" target="_blank" rel="noopener">別タブで同じチームの一覧を確認する</a><label><input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)} disabled={busy} />同じチームで未登録と確認しました。再送します。</label></div>}
-      <div className={styles.createActions}><button className={styles.primary} disabled={busy || loadingMore || members.phase !== 'ready' || people.length === 0 || uncertain && !confirmed}>{busy ? '登録しています…' : '案件を登録する'}</button><button type="button" disabled={busy} onClick={cancel}>入力を破棄して一覧へ戻る</button></div>
+      {uncertain && <div className={styles.uncertain}><a href={`/workspace?team=${teamId}&view=projects`} target="_blank" rel="noopener">別タブで同じチームの一覧を確認する</a><label><input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)} disabled={busy} />一覧と担当者に確認し、未登録と判断しました。重複のリスクを理解して再送します。</label><p>一覧の再取得だけでは保存の成否を確定できません。不明な場合は再送せず管理者へ確認してください。</p></div>}
+      <div className={styles.createActions}><button className={styles.primary} disabled={busy || loadingMore || members.phase !== 'ready' || people.length === 0 || uncertain && !confirmed}>{busy ? '登録しています…' : '案件を登録する'}</button><button type="button" disabled={busy} onClick={() => { if (confirmNavigation()) cancel(); }}>入力を破棄して一覧へ戻る</button></div>
     </form>
   </section>;
 }

@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, lstatSync } from "node:fs";
+import { createHash, createPublicKey } from 'node:crypto';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseEnv } from "node:util";
@@ -52,4 +53,35 @@ export function readSchemaCheckSettings() {
     throw new Error("既存の開発用DB・ユーザーは検証先にできません。");
   }
   return { database, user, password, port };
+}
+
+// 信頼済みDockerから別途取得した標準PEMだけ。接続時の自動取得は行わない。
+export function validatePinnedMysqlPublicKey(pem, expectedFingerprint) {
+  try {
+    if (typeof pem !== 'string' || Buffer.byteLength(pem) > 4096
+      || !/^-----BEGIN PUBLIC KEY-----\r?\n[A-Za-z0-9+/=\r\n]+-----END PUBLIC KEY-----\s*$/.test(pem)
+      || typeof expectedFingerprint !== 'string' || !/^[a-f0-9]{64}$/.test(expectedFingerprint) || /^0+$/.test(expectedFingerprint)) throw new Error();
+    const key = createPublicKey(pem);
+    if (key.asymmetricKeyType !== 'rsa' || key.asymmetricKeyDetails.modulusLength < 2048) throw new Error();
+    const fingerprint = createHash('sha256').update(key.export({ type: 'spki', format: 'der' })).digest('hex');
+    if (fingerprint !== expectedFingerprint) throw new Error();
+    return key.export({ type: 'spki', format: 'pem' }).toString();
+  } catch { throw new Error('ローカルMySQLの固定RSA公開鍵を確認できません。自動取得せず停止しました。'); }
+}
+
+export function readSchemaCheckConnectionOptions() {
+  const settings = readSchemaCheckSettings(); // production・別DB・別ユーザーを従来どおり拒否。
+  const values = parseEnv(readFileSync(schemaCheckEnvPath, 'utf8'));
+  const keyFile = path.join(root, 'work', 'local-mysql-rsa-public.pem');
+  let pem;
+  try {
+    const metadata = lstatSync(keyFile);
+    if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size > 4096) throw new Error();
+    pem = readFileSync(keyFile, 'utf8');
+  } catch { throw new Error('ローカルMySQLの固定公開鍵ファイルが未設定または不正です。'); }
+  return {
+    host: '127.0.0.1', port: settings.port, database: settings.database, user: settings.user, password: settings.password,
+    cachingRsaPublicKey: validatePinnedMysqlPublicKey(pem, values.SCHEMA_CHECK_RSA_SHA256),
+    allowPublicKeyRetrieval: false,
+  };
 }

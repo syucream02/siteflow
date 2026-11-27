@@ -9,8 +9,23 @@
   .shell .panelHeading>div.listActions { width:100%;flex-direction:row;align-items:center;justify-content:space-between; }
 }
 .editField { display:flex;flex-direction:column;gap:10px;margin:8px 0; }.editField label { font-size:13px;font-weight:600; }
+.recordsPanel { border:1px solid #c9d8cf;background:#fff;border-radius:10px;padding:20px;margin:20px 0;line-height:1.9;overflow-wrap:anywhere;min-width:0; }
+.recordsPanel h3 { margin-bottom:16px; }.recordsPanel h4 { font-weight:650;margin:24px 0 12px;padding-top:16px;border-top:1px solid #dfe7e1; }
+.recordsPanel textarea,.recordsPanel input { width:100%;min-width:0;box-sizing:border-box;border:1px solid #c6d4ca;border-radius:7px;padding:10px 12px;background:#fff;color:#203c35;font:inherit;font-size:16px; }
+.recordsPanel textarea { min-height:94px;resize:vertical; }.recordsPanel textarea:read-only { background:#f4f7f4; }
+.recordsPanel textarea:focus-visible { outline:3px solid #24845f;outline-offset:3px; }.recordsPanel button { margin:8px 6px 8px 0; }
 .reviewPanel { border:1px solid #d4c89b;background:#fff9e9;border-radius:10px;padding:20px;margin:20px 0;line-height:1.9;overflow-wrap:anywhere; }.reviewPanel>p { margin:12px 0; }.reviewPanel button { margin-top:14px; }
 .listActions { display:flex;align-items:center;gap:16px;font-size:12px;color:#52705b; }
+.searchForm { padding:22px 30px;border-bottom:1px solid #e0e7e0;display:grid;gap:16px; }
+.searchForm label { display:grid;gap:8px;font-size:13px;font-weight:600;min-width:0; }
+.searchForm input,.searchForm select { width:100%;min-width:0;padding:11px 12px;border:1px solid #c9d6cd;border-radius:8px;background:white;color:inherit;font:inherit;box-sizing:border-box; }
+.searchForm input:focus-visible,.searchForm select:focus-visible,.searchDetails summary:focus-visible { outline:3px solid #24845f;outline-offset:2px; }
+.searchGrid { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;margin:18px 0; }
+.searchDetails summary { cursor:pointer;font-size:14px;font-weight:600; }
+.searchProgress { display:flex;align-items:end;gap:10px;border:0;padding:0;margin:0;min-width:0; }
+.searchProgress legend { font-size:13px;font-weight:600;margin-bottom:8px; }.searchProgress label { flex:1; }
+.searchCount { padding:16px 30px 0;font-size:14px;color:#52665a; }
+@media(max-width:650px) { .searchForm { padding:20px 22px; }.searchGrid { grid-template-columns:minmax(0,1fr); }.searchCount { padding-left:22px; }.searchForm .relatedButtons { flex-wrap:wrap; }.searchForm .help { overflow-wrap:anywhere; } }
 .createForm { padding:28px 30px; }
 .createFields { display:flex;flex-direction:column;gap:10px;border:0;padding:0;margin:24px 0;min-width:0; }
 .createFields>legend { font-weight:650;font-size:17px;margin-bottom:12px; }

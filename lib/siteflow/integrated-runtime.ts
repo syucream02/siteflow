@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { PrismaMariaDb } from '@prisma/adapter-mariadb';
 import { PrismaClient } from '../../examples/mysql/generated/integrated/client.ts';
-import { readSchemaCheckSettings } from '../../examples/mysql/schema-check-settings.mjs';
+import { readSchemaCheckConnectionOptions } from '../../examples/mysql/schema-check-settings.mjs';
 import { integratedOrigin } from './integrated-api.ts';
 import { createIntegratedHandler } from './integrated-handler.ts';
 
@@ -15,9 +15,8 @@ export function getIntegratedHandler() {
     if (shared.siteflowIntegratedRuntime.origin !== origin.origin) throw new Error('RESTART_REQUIRED');
     return shared.siteflowIntegratedRuntime.handle;
   }
-  const db = readSchemaCheckSettings();
   const prisma = new PrismaClient({ adapter: new PrismaMariaDb({
-    host: '127.0.0.1', port: db.port, database: db.database, user: db.user, password: db.password,
+    ...readSchemaCheckConnectionOptions(),
     connectionLimit: 2, connectTimeout: 5000, acquireTimeout: 5000,
   }) });
   // HMRで接続プールやsecretを作り直さない。開発プロセス終了後の再ログインは必要。

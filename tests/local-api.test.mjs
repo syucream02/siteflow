@@ -46,7 +46,15 @@ test('Next.js内部URLとブラウザーHostのループバック表記が違っ
 });
 test('公開する操作だけを中継し、未知のURLと対象外メソッドを拒否する', async () => {
   for (const path of ['auth/sign-up/email', 'teams/other/projects', `teams/${team}/projects/id`, 'auth/../teams']) assert.equal((await proxyLocalApi(request(path), path.split('/'), { ...config, fetcher: forbiddenFetch })).status, 404);
-  const response = await proxyLocalApi(request('teams', post()), ['teams'], { ...config, fetcher: forbiddenFetch }); assert.equal(response.status, 405); assert.equal(response.headers.get('allow'), 'GET');
+  const response = await proxyLocalApi(request('teams', { ...post(), method: 'DELETE' }), ['teams'], { ...config, fetcher: forbiddenFetch }); assert.equal(response.status, 405); assert.equal(response.headers.get('allow'), 'GET, POST');
+});
+test('チーム作成と所属管理の明示した操作だけを中継する', async () => {
+  for (const [path, method] of [['teams', 'POST'], [`teams/${team}/access`, 'GET'], [`teams/${team}/settings`, 'PATCH'], [`teams/${team}/members/${team}`, 'DELETE'], ['me/invitations', 'GET'], [`me/invitations/${team}/accept`, 'POST']]) {
+    const init = method === 'GET' ? {} : { ...post({ expectedVersion: 1 }), method };
+    const response = await proxyLocalApi(request(path, init), path.split('/'), { ...config, fetcher: async (url, options) => { assert.equal(options.method, method); assert.equal(url, `${config.backendOrigin}/api/${path}`); return Response.json({ ok: true }); } });
+    assert.equal(response.status, 200);
+  }
+  for (const path of [`teams/${team}/members/${team}/unknown`, `me/invitations/${team}/force-accept`, 'auth/organization/add-member']) assert.equal((await proxyLocalApi(request(path), path.split('/'), { ...config, fetcher: forbiddenFetch })).status, 404);
 });
 test('更新のOrigin必須・偽のOrigin・クロスサイト要求を拒否する', async () => {
   for (const headers of [{ 'Content-Type': 'application/json' }, { Origin: 'https://example.invalid', 'Content-Type': 'application/json' }, { Origin: base, 'Content-Type': 'application/json', 'Sec-Fetch-Site': 'cross-site' }]) {

@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { parseProjectArchiveInput, availableProjectStatusTargets, parseChangeProjectStatusInput, planProjectStatusChange, parseChangeProjectAssigneesInput, parseEditProjectInput, parseUpdateProjectProgressInput, type ProjectBasicFields, type ProjectStatus } from '@/lib/siteflow/domain';
-import { ApiError, message, request, statusLabels, type Page, type Resource } from './workspace-api';
+import { ApiError, message, request, resultUnknown, statusLabels, type Page, type Resource } from './workspace-api';
 import styles from './connected-workspace.module.css';
+import { confirmNavigation, sameSelection, useDraftGuard } from './draft-guard';
 
 export type EditMode = 'basic' | 'assignees' | 'progress' | 'status' | 'archive' | 'restore';
 type Person = { userId: string; name: string; isCurrentMember?: boolean };
@@ -43,7 +44,7 @@ export function ProjectEditor({ teamId, projectId, mode, signedOut, saved, cance
     return () => controller.abort();
   }, [path, mode, reload]);
   return <section className={styles.projectPanel} aria-labelledby="editor-title" data-project-editor={mode}>
-    <div className={styles.panelHeading}><h2 id="editor-title" ref={heading} tabIndex={-1}>{titles[mode]}</h2><button disabled={saving} onClick={cancel}>入力を破棄して戻る</button></div>
+    <div className={styles.panelHeading}><h2 id="editor-title" ref={heading} tabIndex={-1}>{titles[mode]}</h2><button disabled={saving} onClick={() => { if (confirmNavigation()) cancel(); }}>入力を破棄して戻る</button></div>
     {initial.phase === 'loading' && <p className={styles.feedback} role="status">編集前の情報を読み込んでいます…</p>}
     {initial.phase === 'error' && <div className={styles.feedback}><p role="alert" className={styles.error}>{initial.message}</p><button onClick={() => { setInitial({ phase: 'loading' }); setReload(value => value + 1); }}>編集情報を再取得する</button><button onClick={cancel}>詳細へ戻る</button></div>}
     {initial.phase === 'ready' && <EditorForm initial={initial.value} path={path} teamId={teamId} mode={mode} signedOut={signedOut} saved={saved} cancel={cancel} savingChanged={updateSaving} />}
@@ -64,7 +65,13 @@ function EditorForm({ initial, path, teamId, mode, signedOut, saved, cancel, sav
   const [memberReload, setMemberReload] = useState(0); const [memberBusy, setMemberBusy] = useState(false); const [memberError, setMemberError] = useState('');
   const [busy, setBusy] = useState(false); const posting = useRef(false); const active = useRef(true);
   const [error, setError] = useState(''); const [needsReview, setNeedsReview] = useState(false);
+  const [uncertain, setUncertain] = useState(false);
   const [latest, setLatest] = useState<Resource<Snapshot> | null>(null);
+  const dirty = mode === 'basic' ? Object.keys(draft).some(key => draft[key as keyof ProjectBasicFields] !== (initial.project[key as keyof ProjectBasicFields] ?? ''))
+    : mode === 'assignees' || mode === 'restore' ? primary !== initial.project.primaryAssignee.userId || !sameSelection(supports, initial.supports.map(p => p.userId))
+    : mode === 'progress' ? progress !== String(initial.project.progress) || Boolean(comment)
+    : mode === 'status' ? Boolean(status || comment) : false;
+  const releaseGuard = useDraftGuard(dirty || needsReview, busy, () => {});
   const readController = useRef<AbortController | null>(null); const moreController = useRef<AbortController | null>(null);
   const callbacks = useRef({ signedOut, saved, savingChanged });
   useEffect(() => { callbacks.current = { signedOut, saved, savingChanged }; }, [signedOut, saved, savingChanged]);
@@ -126,13 +133,13 @@ function EditorForm({ initial, path, teamId, mode, signedOut, saved, cancel, sav
       body = input; target += '/' + mode; method = 'POST';
     }
     posting.current = true; setBusy(true); callbacks.current.savingChanged(true);
-    try { await request(target, undefined, body, method); if (active.current) callbacks.current.saved(); }
+    try { await request(target, undefined, body, method); if (active.current) { releaseGuard(); callbacks.current.saved(); } }
     catch (error) {
       if (!active.current) return;
       if (error instanceof ApiError && error.status === 401) callbacks.current.signedOut();
       else {
-        const review = !(error instanceof ApiError) || error.status === 409 || error.status >= 500;
-        setNeedsReview(review); setLatest(null);
+        const review = resultUnknown(error) || error instanceof ApiError && error.status === 409;
+        setNeedsReview(review); setUncertain(resultUnknown(error)); setLatest(null);
         setError(review ? message(error) + ' 入力は保持しています。最新の内容を確認し、比較してから保存し直してください。' : message(error));
       }
     } finally { posting.current = false; callbacks.current.savingChanged(false); if (active.current) setBusy(false); }
@@ -141,7 +148,7 @@ function EditorForm({ initial, path, teamId, mode, signedOut, saved, cancel, sav
   const statusTargets = availableProjectStatusTargets(reviewedProject.status);
   for (const person of [initial.project.primaryAssignee, ...initial.supports, ...(members.phase === 'ready' ? members.value.items : [])]) candidates.set(person.userId, person);
   return <form aria-label={titles[mode]} className={styles.createForm} onSubmit={submit} aria-busy={busy}>
-    <p className={styles.help}>管理者・現在の主担当・副担当が保存できます。チーム切替・画面移動では入力を破棄します。</p>
+    <p className={styles.help}>管理者・現在の主担当・副担当が保存できます。{busy ? '保存中です。' : needsReview ? uncertain ? '保存結果は不明です。最新版と比較してください。' : '更新競合で保存できませんでした。最新版と比較してください。' : error ? '保存できませんでした。入力を確認してください。' : dirty ? '未保存の入力があります。' : '未変更です。'}</p>
     {mode === 'basic' && <p className={styles.help}>編集開始時から変更した項目だけを保存します。変更しない項目は、他の人が保存した最新の値を保持します。</p>}
     {(mode === 'archive' || mode === 'restore') && <div className={styles.notice}><strong>{reviewedProject.name}</strong><p>状態：{statusLabels[reviewedProject.status]} · 進捗 {reviewedProject.progress}％</p>{mode === 'archive' ? <p>通常一覧から外して保管します。案件と履歴は削除せず、状態・進捗も変えません。</p> : <p>通常一覧へ戻します。担当者全員を確認し、必要なら選び直してください。状態と進捗は保持し、完了済みでも自動で再開しません。</p>}</div>}
     <fieldset disabled={busy} className={styles.createFields}><legend>{titles[mode]}</legend>
@@ -185,6 +192,6 @@ function EditorForm({ initial, path, teamId, mode, signedOut, saved, cancel, sav
         {mode === 'status' && <><div><dt>状態・進捗</dt><dd>編集開始時：{statusLabels[initial.project.status]}・{initial.project.progress}％<br />最新：{statusLabels[latest.value.project.status]}・{latest.value.project.progress}％<br />あなたの変更先：{status ? statusLabels[status] : '未選択'}</dd></div><div><dt>入力したメモ・理由</dt><dd>{comment || 'なし'}</dd></div></>}
       </dl><button type="button" onClick={() => { setVersion(latest.value.project.version); setReviewedProject(latest.value.project); setNeedsReview(false); setLatest(null); setError(''); }}>比較しました。入力を保持して保存可能にする</button></>}
     </div>}
-    <div className={styles.createActions}><button className={styles.primary} disabled={busy || needsReview || latest?.phase === 'loading' || (mode === 'assignees' || mode === 'restore') && (members.phase !== 'ready' || memberBusy)}>{busy ? '保存しています…' : mode === 'archive' ? 'アーカイブを確定する' : mode === 'restore' ? '担当を確認して復元する' : '変更を保存する'}</button><button type="button" disabled={busy} onClick={cancel}>入力を破棄して詳細へ戻る</button></div>
+    <div className={styles.createActions}><button className={styles.primary} disabled={busy || needsReview || latest?.phase === 'loading' || (mode === 'assignees' || mode === 'restore') && (members.phase !== 'ready' || memberBusy)}>{busy ? '保存しています…' : mode === 'archive' ? 'アーカイブを確定する' : mode === 'restore' ? '担当を確認して復元する' : '変更を保存する'}</button><button type="button" disabled={busy} onClick={() => { if (confirmNavigation()) cancel(); }}>入力を破棄して詳細へ戻る</button></div>
   </form>;
 }

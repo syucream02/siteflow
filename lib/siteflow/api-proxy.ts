@@ -18,6 +18,18 @@ export async function proxyApiRequest(request: Request, path: readonly string[],
   const projectCollection = new RegExp(`^teams/${teamId}/projects$`, 'i').test(route);
   const detail = new RegExp(`^teams/${teamId}/projects/${teamId}$`, 'i').test(route);
   const allowed = route === 'auth/sign-in/email' || route === 'auth/sign-out' ? ['POST']
+    : route === 'teams' ? ['GET', 'POST']
+    : route === 'me/invitations' ? ['GET']
+    : new RegExp(`^me/invitations/${teamId}/(?:accept|decline)$`, 'i').test(route) ? ['POST']
+    : new RegExp(`^teams/${teamId}/settings$`, 'i').test(route) ? ['GET', 'PATCH']
+    : new RegExp(`^teams/${teamId}/access$`, 'i').test(route) ? ['GET']
+    : new RegExp(`^teams/${teamId}/members/${teamId}/removal-check$`, 'i').test(route) ? ['GET']
+    : new RegExp(`^teams/${teamId}/members/${teamId}$`, 'i').test(route) ? ['PATCH', 'DELETE']
+    : new RegExp(`^teams/${teamId}/(?:leave|invitations/${teamId}/cancel)$`, 'i').test(route) ? ['POST']
+    : new RegExp(`^teams/${teamId}/invitations$`, 'i').test(route) ? ['GET', 'POST']
+    : new RegExp(`^teams/${teamId}/meetings$`, 'i').test(route) ? ['GET', 'POST']
+    : new RegExp(`^teams/${teamId}/meetings/${teamId}$`, 'i').test(route) ? ['GET', 'PATCH']
+    : new RegExp(`^teams/${teamId}/meetings/${teamId}/entries/${teamId}/(?:records|carry-candidates)$`, 'i').test(route) ? ['GET']
     : projectCollection ? ['GET', 'POST'] : detail ? ['GET', 'PATCH']
     : new RegExp(`^teams/${teamId}/projects/${teamId}/assignees$`, 'i').test(route) ? ['PUT']
     : new RegExp(`^teams/${teamId}/projects/${teamId}/(?:progress|status)$`, 'i').test(route) ? ['PATCH']
