@@ -214,11 +214,11 @@ GitHub UIのproductionにはsecretなし。アプリの秘密はEC2暗号化EBS�
 | 新規 | 条件付き送信候補 | DB/API/検証例 | `db/design/migrations/migration_lock.toml` |
 | 新規 | 条件付き送信候補 | DB/API/検証例 | `db/design/schema.prisma` |
 | 新規 | 条件付き送信候補 | CI/CD設計・配信 | `deploy/app-runtime.example.env` |
-| 新規 | 条件付き送信候補 | CI/CD設計・配信 | `deploy/backup/bucket-policy.json` |
-| 新規 | 条件付き送信候補 | CI/CD設計・配信 | `deploy/backup/bucket-settings.json` |
+| 新規 | 条件付き送信候補 | CI/CD設計・配信 | `deploy/backup/bucket-policy.example.json` |
+| 新規 | 条件付き送信候補 | CI/CD設計・配信 | `deploy/backup/bucket-settings.example.json` |
 | 新規 | 条件付き送信候補 | CI/CD設計・配信 | `deploy/backup/lifecycle.json` |
-| 新規 | 条件付き送信候補 | CI/CD設計・配信 | `deploy/backup/restore-policy.json` |
-| 新規 | 条件付き送信候補 | CI/CD設計・配信 | `deploy/backup/role-policy.json` |
+| 新規 | 条件付き送信候補 | CI/CD設計・配信 | `deploy/backup/restore-policy.example.json` |
+| 新規 | 条件付き送信候補 | CI/CD設計・配信 | `deploy/backup/role-policy.example.json` |
 | 新規 | 条件付き送信候補 | CI/CD設計・配信 | `deploy/cd-check.sh` |
 | 新規 | 条件付き送信候補 | CI/CD設計・配信 | `deploy/check-app-secrets.sh` |
 | 新規 | 条件付き送信候補 | CI/CD設計・配信 | `deploy/check-database-mount.sh` |

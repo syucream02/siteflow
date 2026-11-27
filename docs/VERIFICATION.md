@@ -1,3 +1,162 @@
+## 2026-11-25：チーム作成・所属管理・本人専用招待（ローカル実装・本番未反映）
+
+既存APIを再利用したチーム作成、所属0件導線、チーム設定/改名、メンバー一覧、admin/member変更、本人宛て招待の承認/辞退/取消、条件付き所属解除/退出を接続した。一般公開登録・招待限定登録・実メール本人確認/送信は公開前の検討課題として残す。Organizationプラグインは有効化していない。不在進行役は検出と報告だけで、復旧しない。
+
+### DBと保護
+
+既存のDocker Desktop local MySQL、REQUIRES_APPROVED_PUBLIC_IPV4:3307、専用DB/ユーザー、手動確認用DBの一致を実接続で照合。既存migrationは完了、Invitationは0件だった。旧招待を推測で有効化していない。固定RSA公開鍵設定・認証方式・ユーザー権限は維持した。
+
+20261125_team_managementはTeam.versionをNOT NULL DEFAULT 1で追加するだけ。Prisma migrate deploy成功後にClient生成。別開発DB・本番への適用、reset、既存データ削除は行っていない。
+
+適用前SQL56,984バイト、適用後SQL57,229バイトを所有者限定のGit除外work/team-management-backupへ保存。既存業務14表の全行/既存列と、認証3表のID/件数が指紋一致。Teamの新列だけを比較対象から分け、既存行がすべてversion=1であることも確認した。会議の追加3表を含むデータを保持している。
+
+復元は空の隔離先へのみ行い、既存DBへSQLを上書きしない手順。今回は復元用DBの新規作成・実復元を実行していない。バックアップは認証情報を含み得るので、Git・チャットへ出さない。
+
+### 自動検証結果
+
+| 検証 | 結果 |
+| --- | --- |
+| 新規チーム入力・期限判定 | 4件成功 |
+| 新規専用MySQL/実HTTP | 18件成功。権限、チーム分離、同時退出、担当追加と解除、承認と取消、再利用、7日/期限切れ、ロック待ち中の期限切れ、降格/解除/退出時の保留取消、過去記録不変、人物再利用、途中例外の全取消、ページ分割、不在進行役の検出 |
+| 業務・検索・中継の関連テスト | 116件成功。新規入力4件と中継追加1件を含む |
+| 既存の専用DB/実HTTP回帰 | 認証/案件102件、会議15件、対応事項12件、検索DB6件、計135件成功 |
+| Node試験の重複を除く合計 | 269件成功、失敗・スキップ0。新規23件＋既存246件 |
+| TypeScript | 本体とexamples/mysqlの両方で成功 |
+| ESLint | 変更コード・テスト17ファイル、エラー・警告0 |
+| Next.js build | 16.3.4、検証専用キャッシュで成功。既存tsbuildinfoとnext-envの内容を保持 |
+| 新規Chrome通し | 11項目成功。所属0件、Enter作成、25メンバー/21招待、戻る/409保持、役割/解除確認、招待作成/取消/辞退/参加、一般メンバー表示、退出後403、別チーム/セッション維持、外部解除時の表示クリア |
+| 作成応答喪失のChrome試験 | 1項目成功。実DB保存後のHTTP応答をChromeで遮断し、自動再送・重複作成なし、所属一覧で作成済み1件を確認 |
+| 共有UIの既存Chrome回帰 | 検索15項目、会議記録11項目、計26項目成功。利用者による手動操作確認ではない |
+
+通常の実ブラウザー試験はAPI本文のモック/差替えを使わない。応答喪失試験だけは--creation-failure-onlyで通信を遮断する。全試験は架空ユーザー/チームだけを作り、終了時に回収し既存データの前後指紋を照合した。
+
+初回Chromeは試験のEnter送信先にフォーカスがなく作成できず失敗。フォーカスを明示し、画面にも入力開始時のフォーカスを追加した。次の試験はチーム名の「辞退」で待機条件を満たしてしまい、辞退更新完了前に承認へ進んで失敗。状態とボタン再有効化を待つ条件へ修正して最終通し成功。いずれも試験データ回収済み。Lintの描画中Date.nowはサーバーの期限判定値へ変更。旧中継テストのTeams POST拒否だけを採用仕様に合わせて更新し、DELETE等の拒否と未知パス拒否は維持・追加した。
+
+画像はwork/team-management-real/team-1440.png、team-390.png。結果は同results.json、応答喪失はwork/team-management-fault/results.json。Git除外。画像も目視して折返し・操作ボタン・入力欄を確認した。
+
+### 変更ファイル
+
+- DB：db/design/integrated.prisma、db/design/migrations/20261125_team_management/migration.sql。
+- 業務/API：lib/siteflow/domain.ts、lib/siteflow/api-proxy.ts、examples/mysql/team-membership-service.ts、team-invitation-service.ts、team-management-handler.ts、web-api-handler.ts（後ろ3件も同examples/mysql）。
+- 画面：components/siteflow/team-create.tsx、team-settings.tsx、team-invitations.tsx、connected-workspace.tsx、meeting-workspace.tsx、workspace-api.ts（同components/siteflow）。
+- 検証：examples/mysql/local-workspace-data.ts、examples/mysql/check-team-management-e2e.mjs、tests/team-management.test.mjs、tests/team-management-db.test.mjs、tests/local-api.test.mjs。
+- 資料：docs/LEARNING_GUIDE.html、MEMBERSHIP_AND_HISTORY.md、DATA_MODEL.md、LOCAL_WORKSPACE.md、NON_FUNCTIONAL_REQUIREMENTS.md、VERIFICATION.md（同docs）。
+
+計25ファイル。既存の案件・会議サービスの権限は緩和せず、業務の所属行ロックを管理側のロック順序で再利用した。進行役代行、会議外対応事項更新、業務の自動引き継ぎは追加していない。
+
+保護確認：開始時の未コミット36項目はすべて保持。直接関係する12項目へ変更を追加し、残る24項目は状態・SHA-256とも不変。CD/workflow/依存設定/除外生成物など既存保護99ファイルもSHA-256一致。終了時は49項目、ステージ空。ブランチfeat/nextjs-mysql-approved-cd、HEAD d60a85a3abd2f95dd5a3c50085f9e6c917997ac6を維持。commit/pushなし。HTMLタグ整合・JavaScript/JSON構文・新テーマ参照ファイル・ローカルMarkdownリンク・git diff --checkを確認した。完全なHTML規格適合性や全リンクの外部到達性を検証した意味ではない。
+
+### 再現コマンドの意味
+
+- SITEFLOW_TEAM_CHECK=1をこのプロセスに設定し、node --experimental-strip-types --test tests/team-management.test.mjs tests/team-management-db.test.mjs：型注釈を除去し、指定の入力4件とDB/API18件を実行する。専用DBの試験データだけを書き込み、回収する。フラグなしのskipは成功に含めない。
+- npx.cmd --no-install tsc --noEmit --incremental false：導入済みTypeScriptで型検査し、JSと検査キャッシュを出力しない。--project examples/mysql/tsconfig.json付きではAPI例の設定を使う。DB変更なし。
+- npx.cmd --no-install eslint に変更ファイルを列挙：導入済みESLintで対象だけを検査する。--fixなしでファイルを書き換えない。
+- SITEFLOW_LOCAL_CHECK=1とNEXT_TELEMETRY_DISABLED=1をこのプロセスに設定しnpm.cmd run build：既存のprebuildでClient生成後、検証専用キャッシュに本番形式の生成物を作る。公開・DB適用は行わない。
+- SITEFLOW_TEAMS_BROWSER_ORIGIN=http://REQUIRES_APPROVED_PUBLIC_IPV4:5192をこのプロセスに設定しnode --experimental-strip-types examples/mysql/check-team-management-e2e.mjs：実ChromeでPC内の新規起動Next.jsへ接続する。--creation-failure-only付きは応答喪失1項目だけ。指定なしは通常11項目。架空データ・専用Chromeを回収し、成功時にPASSとcleanup verifiedを表示する。
+
+未実施：利用者による手動確認、実復元、本番・別開発DB適用、実メール本人確認と登録、全ブラウザー/読み上げ/全キー操作、全競合・分散時計・大量データ性能、不在進行役の限定復旧。CDは変更せず、本番CDのGO判定に使わない。
+
+---
+
+## 2026-11-25：会議の相談・決定・選択的引き継ぎ（ローカル実装・本番未反映）
+
+- 対象：追加3モデル・migration、会議記録API、進行役による保存、会議別snapshot、選択的引き継ぎ、未保存入力保護。既存案件検索の差分は保持した。
+- 接続：既存ローカルDocker MySQL8.4.13、REQUIRES_APPROVED_PUBLIC_IPV4:3307、専用DB・専用ユーザーを実接続で照合。手動アカウントのDBも同一と確認。RSA公開鍵固定を再利用し、認証・ユーザー・権限は変更していない。
+- migration：20261124_meeting_recordsをPrisma migrate deployで適用。追加テーブル3件・複合FK・一意制約・索引のみ。過去会議への推測補完・既存列削除・resetなし。Prisma validateとClient生成も成功。差分SQL生成はdatasourceの形式用URLを設定して解決し、空のmigrationを適用していない。
+- 保護：適用前SQL44,086バイトと適用後SQL52,960バイトを所有者制限付きGit除外フォルダーに保存。適用後SQLには新3テーブルのDDLがある。既存業務10テーブルの全行指紋、認証3テーブルのID/件数が前後一致。新テーブルは試験回収後0件。新テーブルを含む実復元は未実施。
+
+| 実施した検証 | 結果 |
+| --- | --- |
+| 新規入力・状態検証 | 4件成功 |
+| 新規実HTTP/専用MySQL | 12件成功。メモ保存・編集、終了後不変、権限/チーム/FK拒否、引き継ぎ重複・元記録偽造・完了/取消からの復活拒否、複数会議の本体版照合、終了と保存の競合、改名/退会時再割当、ページ分割、途中例外の全取消 |
+| 既存の関連業務・検索・中継 | 107件成功（新規入力4件と一緒に111件実行） |
+| 既存の実DB/API回帰 | 認証/案件102件・会議15件・検索DB6件、計123件成功 |
+| Nodeテスト合計（重複実行を除く） | 246件成功、失敗・スキップ0件。CDの無関係な回帰試験は再実行していない |
+| TypeScript | 本体とexamples/mysqlの両方で成功。--noEmit --incremental false |
+| ESLint | 変更対象13コード/テストファイルでエラー・警告0 |
+| Next.js build | 16.3.4、検証専用キャッシュで成功。生成された既存tsbuildinfo/next-envを元の内容に戻した |
+| 実MySQL→実API→Next.js→Chrome | 11項目成功、API50応答。ログイン、10秒更新/戻るの入力保持、登録、実409比較後再保存、引き継ぎ、スマホ編集・完了・過去記録保持、Tab操作、PC1440/390画像、元会議の閲覧、他チーム拒否、既存検索への復帰 |
+
+初回のChrome検証は既存5187サーバーで新記録APIに到達できず失敗。ハンドラーをメモリに保持していたため、新しい5191サーバーと検証専用キャッシュへ切り分けた。次の試験では保存後の再取得中に終了操作が反映されないケースを検出し、再取得中はボタンを無効化し、保存後の会議再取得完了を待つよう修正。修正後と最終スタイル調整後の通し試験は成功した。失敗時も試験データは回収済み。既存5187サーバーとMySQLは停止していない。
+
+実画像・結果はGit除外のwork/meeting-records-real/meeting-1440.png、meeting-390.png、results.json。画像も目視し、入力欄の境界・ラベル・状態・折り返しを確認した。再現用はexamples/mysql/check-meeting-records-e2e.mjs。応答モックやDBの代替データを使わず、一時チームだけを作成・回収して前後指紋を照合する。
+
+### 変更ファイルと保護結果
+
+- DB：`db/design/integrated.prisma`、`db/design/migrations/20261124_meeting_records/migration.sql`。
+- 入力・API：`lib/siteflow/domain.ts`、`lib/siteflow/api-proxy.ts`、`examples/mysql/meeting-record-service.ts`、`examples/mysql/meeting-service.ts`、`examples/mysql/web-api-handler.ts`。
+- 画面：`components/siteflow/meeting-records.tsx`、`meeting-workspace.tsx`、`connected-workspace.tsx`、`workspace-location.ts`、`connected-workspace.module.css`（後ろ4件も同ディレクトリ）。
+- 試験と回収：`examples/mysql/local-workspace-data.ts`、`examples/mysql/check-meeting-records-e2e.mjs`、`tests/meeting-records.test.mjs`、`tests/meeting-records-db.test.mjs`。
+- 資料：`docs/LEARNING_GUIDE.html`、`LOCAL_WORKSPACE.md`、`MEETING_FLOW.md`、`DATA_MODEL.md`、`NON_FUNCTIONAL_REQUIREMENTS.md`、`VERIFICATION.md`（同docsディレクトリ）。
+
+今回22ファイルに変更/追加。開始時の未コミット23項目は全件保持し、直接関係する9項目へ変更を追加、残る14項目はSHA-256も一致。CD/workflow/依存設定/除外生成物など既存保護99ファイルもすべて一致。終了時の未コミットは36項目、ステージは空。ブランチfeat/nextjs-mysql-approved-cd、HEAD d60a85a3abd2f95dd5a3c50085f9e6c917997ac6を維持。commit/pushなし。
+
+### 検証コマンドの意味
+
+- node --experimental-strip-types --test tests/meeting-records.test.mjs tests/meeting-records-db.test.mjs：NodeがTypeScriptの型を除去して指定のテストだけを実行する。実DB試験は、このプロセスの環境変数SITEFLOW_MEETING_RECORDS_CHECK=1を明示して実行する。既存専用DBの試験用チームへ書き込み、回収する。フラグなしのskipを成功件数へ加えない。
+- npx.cmd --no-install tsc --noEmit --incremental false：導入済みTypeScriptだけで型を検査。--no-installは新規導入しない、--noEmitはJSを作らない、--incremental falseは検査キャッシュを書かない指定。--project examples/mysql/tsconfig.jsonを加えた試験ではAPI例の設定を使う。DB変更なし。
+- npx.cmd --no-install eslint に変更ファイルのパスを列挙：導入済みESLintでそのファイルを検査する。--fixは付けず、書き換えない。エラー・警告0を期待する。
+- SITEFLOW_LOCAL_CHECK=1とNEXT_TELEMETRY_DISABLED=1をこのプロセスへ設定してnpm.cmd run build：既存のprebuildでClientを生成し、検証専用キャッシュにNext.jsをビルドする。公開・DB適用をしない。
+- SITEFLOW_RECORDS_BROWSER_ORIGIN=http://REQUIRES_APPROVED_PUBLIC_IPV4:5191をこのプロセスへ設定し、node --experimental-strip-types examples/mysql/check-meeting-records-e2e.mjs：このPCの新規起動Next.jsへ実Chromeで接続。実ログインと一時データ書き込み、画像保存、回収・前後照合を行う。パスワード・Cookie値は出力しない。成功時はPASS 11とcleanup verifiedを表示する。
+
+未検証：本番適用、別の開発DB、追加3テーブルの実復元、全ブラウザー・読み上げ・全操作のキーボード、高負荷・長大履歴・全デッドロック・端末強制終了からの下書き復元。ローカル検証結果を本番CDのGOとは扱わない。CDファイル・AWS・本番・Git履歴を変更していない。
+
+---
+
+# 案件検索の実ブラウザー通し試験（2026-11-24）
+
+- `examples/mysql/check-project-search-e2e.mjs`を追加。実Chrome→PC内Next.js統合API→Prisma→固定RSA公開鍵→専用MySQLを接続。Fetchによる応答差し替えは使わず、68件の実API応答を観測。15項目成功。
+- 確認範囲：実ログイン/HttpOnly Cookie、案件名/番号/特殊文字、主副担当/状態/進捗0のAND条件、候補2ページ目、25件の総件数と20→25件の追加取得、0件と未登録、リセット、再読込/戻る/進む、チーム切替、実セッションの他チーム403、詳細編集とDB保存/再取得、会議25案件の確認/取消監査/終了、通常/保管切替、スマホEnter検索、ログアウト後401。
+- PC1440px・スマホ390pxの画像を保存し、実画像も確認。横はみ出しなし。保存先はGit除外の`work/project-search-real/search-1440.png`、`search-390.png`。結果は同フォルダーのresults.json。以前のwork/project-searchは模擬APIであり、今回とは別。
+- 開始前に専用DB名とCURRENT_USERを照合。架空の一時アカウント・チーム・案件・候補だけを操作し回収。業務10テーブル全行と認証3テーブルID/件数の指紋は前後一致。既存の手動確認アカウントも秘密値を出さず読み取り照合し、有効だった。
+- 初回の会議試験は、確認後の自動次案件表示が完了する前にスクリプトが選択を変えてタイムアウト。UIが操作可能かつ確認件数が反映済みになるまで待つよう検証だけを修正し、再実行で15項目成功。初回失敗時も一時データの回収と既存指紋一致を確認。アプリコードの修正なし。
+- 新規検証スクリプトのESLint・構文、資料の整合性を確認。成功済みの型検査・build・業務/API/DB回帰・模擬Chrome試験は再実行していない。大量データ性能・全ブラウザー・本番反映は対象外。
+
+起動はLOCAL_WORKSPACE.md冒頭の統合モードを使用する。`node --experimental-strip-types examples/mysql/check-project-search-e2e.mjs`は、Nodeが型注釈を読み飛ばして通し検証を起動する。接続は既定でPC内5187番、RSA固定済みの専用DBだけ。専用Chromeを起動し、一時データの作成/操作/削除とGit除外領域への画像保存を行う。資格情報をログ・コマンド引数へ出さない。今回の一時Next.jsは終了し、既存MySQLは起動状態を維持した。下記の単体・DB試験は前段の結果として保持する。
+
+# RSA固定後の実DB検証完了（2026-11-24・ローカルのみ）
+
+- 既存MySQLの認証方式caching_sha2_passwordとMariaDB 3.5.4を確認。信頼済みローカルDockerからRSA公開鍵のみを取得し、標準PEMとSPKI DERのSHA-256へ正規化。Git除外ファイル/専用設定に固定した。秘密鍵の取得・パスワード/権限変更・公開鍵の無条件取得なし。
+- ローカル専用接続へcachingRsaPublicKeyとallowPublicKeyRetrieval:falseを適用。production拒否・専用DB/ユーザー/ポートの検証は維持。本番接続設定/TLS・CD・スキーマ・依存は変更しない。実SQLで専用DBとCURRENT_USERの一致を確認した。
+- **実MySQL/HTTP：検索6件・認証/案件管理102件・会議15件＝123件成功、失敗/スキップ0件。** 名前と番号のOR、主副担当・状態・進捗のAND、総件数/カーソル、通常/保管、未ログイン・他チーム・所属失効、空一覧を検証。%・_・バックスラッシュ・引用符は文字として一致。案件name/code列はutf8mb4_unicode_ciで、英字大小・É/é/eの同一視を実検索で確認。
+- **RSA固定の単体9件成功。** 一致鍵、未設定、不正/過大PEM、全0/不一致指紋、末尾データ、1024bit RSA・EC鍵を検査。認証キャッシュの有無に依存せず、ファイル/指紋の検証を接続前に行う。
+- 初回の案件管理回帰で新しい総件数項目を含まない旧期待値1か所が失敗し、total/collectionTotalの期待値を追加して102件を再実行・成功。安全条件を緩和しない。型検査で公開鍵返り値の文字列型を明示する修正も行い、本体/API型検査・関連ESLint・Next.js buildが成功。
+- 試験前後で専用DBの業務10テーブルの全行指紋、認証3テーブルのID指紋・件数が一致。既存22案件・4ユーザーなどを保持し、架空の試験データは回収済み。既存の開発DB・本番DBへは接続しない。MySQLコンテナ/ボリュームの再作成、DB初期化、migrationなし。
+
+実行コマンド：`node --test tests/local-mysql-rsa.test.mjs`はNode標準テストで一時試験鍵の公開部分だけを検証し、実DBを操作しない。`SITEFLOW_SEARCH_CHECK=1`を子プロセス環境に指定した`node --experimental-strip-types --test tests/project-search-db.test.mjs`は型注釈を読み飛ばして専用DBの検索6件を実行。`node run-auth-check.mjs`と`node run-meeting-check.mjs`はexamples/mysql内の既存ランナーで、それぞれ明示フラグとtsxを使い認証/案件・会議のHTTP/DB試験を起動する。既存DB名/ユーザーを照合し、テスト専用データだけを作成/回収する。コマンドの引数へ資格情報は渡さない。
+
+コード変更があるため本体/APIの`tsc --noEmit --incremental false`（生成物/型キャッシュを出さず型検査）、対象ESLint（自動修正なし）、`npm.cmd run build`（既存prebuildのPrismaクライアント生成とNext.js build、migration/公開なし）を実行。成功済みの模擬Chrome14項目・無関係なCD回帰は再実行していない。RSA認証は通信全体のTLS化とは別。公開DBの照合順序一致・大量データ性能・本番反映は未検証。以下の停止記録は過去の経過として保持する。
+
+# 実DB試験の再開結果（2026-11-24・認証段階で停止）
+
+- ユーザー承認後、PC内Docker Desktop/Engineの起動を確認。既存siteflow-dev-mysql-1（mysql:8.4.13）とsiteflow-dev_mysql-dataが存在し、image・Compose project/service・REQUIRES_APPROVED_PUBLIC_IPV4:3307→3306・ボリューム・所有ラベル・既存環境設定の一致7項目を確認した。秘密値は非表示。
+- 確認済みComposeで既存コンテナだけをstart。再作成・pull・ボリューム削除なし。起動前後で同じコンテナID、起動後running/healthy、restart count 0。TCP接続は成功し、従来のECONNREFUSEDは解消。
+- 専用設定からのPrisma接続はSELECT 1の認証段階でP2010 / ドライバー45028 / SQLSTATE HY000により失敗。エラー全文は出さずRSA公開鍵関連であることを分類。既存mariadbドライバーのcaching-sha2-password-auth.jsでは、完全認証時に検証済みの安全な接続またはcachingRsaPublicKeyがなく、allowPublicKeyRetrievalも無効ならこのエラーになる。
+- DB名/ユーザーの実照合と既存データ指紋の読み取りは完了せず、検索の実MySQL試験、認証/チーム分離、案件管理・会議のDB回帰は開始していない。テスト用データの作成・変更・削除なし。MySQL起動に伴う内部書き込みと、試験データの書き込みは区別する。
+- 認証条件・TLS・権限・パスワード・スキーマは変更せず停止。公開鍵の無条件取得を有効にせず、信頼済みローカルDocker経由で確認した固定RSA公開鍵を使う方法、または検証済みTLSを使う方法を別承認で検討する。再起動で完全認証が必要になった可能性はあるが、過去の認証キャッシュは未確認。
+- 成功済みの型検査・lint・build・模擬Chromeを再実行していない。以下の124件/14項目などは前回の成功記録で、今回実DB試験が成功した意味ではない。
+
+今回の`docker --context desktop-linux compose --env-file .env.mysql.local -f compose.dev.yaml start mysql`は、contextで確認済みPC内Engine、env-fileで既存設定、fで既存Composeを選び、start mysqlで既存サービスだけを起動する。データ保存先を作り直すupや削除操作は使わない。inspectは実設定の読み取り、config --quietは設定を表示しない構文検査に使用した。DB確認のSELECT 1は接続後の最小読み取り、SELECT DATABASE()/CURRENT_USER()は実接続先の照合用だが、今回どちらも認証が完了しないためSQLの成功には至っていない。
+
+# 案件検索・絞り込み（2026-11-24・ローカル実装）
+
+- 案件名/番号の部分一致、主副担当・状態・進捗範囲、通常/保管、総件数、検索条件のURL復元を実装。DB定義・依存・CDは変更なし。
+- 本体とexamples/mysqlの型検査成功。業務・会議・接続/中継・今回の条件/APIハンドラーを合わせて124件成功（検索追加28件）。認可の試験は模擬Prisma/セッションであり、実認証のHTTP/DB試験ではない。
+- 今回の変更対象のESLintはエラー・警告0件。実DB試験ファイルの構文検査とgit diff --checkも成功。既存の案件0件テストは新しいtotal/collectionTotalの応答契約へ期待値を更新したが、実DBでの再実行は未実施。
+- 実Chromeは架空API応答で14項目成功。20→25件追加、複合検索、候補2ページ目、URL再読込/戻る/進む、0件と未登録、通信失敗/再試行、旧応答排除、チーム切替、1440/390px、Enter検索。画像：work/project-search/search-1440.png、search-390.png。
+- ローカル検証DBは設定上loopback・専用DB/ユーザーに制限されるがTCP接続がECONNREFUSED。実接続先の照合完了・架空データ作成・実MySQL検索・HTTP/DB試験は未実施。本番へ接続しない。専用のtests/project-search-db.test.mjsを用意したが、成功扱いしない。
+- Next.js buildは制限環境で既存作業フォルダー参照の拒否により失敗。権限設定を変えず通常権限で再実行し成功。前段の2回のChrome試験は開発時二重取得とEnter模擬入力の不備で失敗し、検証側を修正して最終14件成功。
+
+### 再確認コマンドと意味
+
+- `npx.cmd --no-install tsc --noEmit --incremental false`：既存TypeScriptで本体の型を検査する。no-installは依存取得なし、noEmitは出力なし、incremental falseは既存の型キャッシュを更新しない指定。API側は同じコマンドに`--project examples/mysql/tsconfig.json`を加えて対象設定を指定する。
+- `node --experimental-strip-types --test tests/project-search.test.mjs tests/project-search-api.test.mjs`：Nodeが型注釈を読み飛ばし、指定した入力ルール/API模擬試験だけを実行する。DB・ネットワーク・既存データを変更しない。関連124件の検証ではdomain・meeting-domain・local-api・integrated-api・workspace-connection・public-api-proxyの既存テストも指定した。
+- 実DBが利用できる時だけ、PowerShellで`$env:SITEFLOW_SEARCH_CHECK='1'`を設定して`node --experimental-strip-types --test tests/project-search-db.test.mjs`を実行する。フラグは専用DB試験の明示許可、testの引数は対象ファイル。loopback設定とSELECT DATABASE()/CURRENT_USER()を照合後、架空ユーザー/案件だけを作成して後片付けする。DB新設・migration・本番接続はしない。終了後は`Remove-Item Env:SITEFLOW_SEARCH_CHECK`でこのシェルのフラグだけを解除する。
+- `node examples/mysql/check-project-search-browser.mjs`：PC内5187番の実React画面を専用Chromeで試験する。API応答はすべて架空で、実DB検証の代わりにはならない。専用プロファイルとGit除外work/project-searchへ画像を作成する。通常ブラウザーや本番には触れない。対象サーバーは`node node_modules/next/dist/bin/next dev --hostname REQUIRES_APPROVED_PUBLIC_IPV4 --port 5187`で起動できる。nodeの引数は既存Next.js本体、devは開発起動、hostnameはPC内限定、portは待受番号。SITEFLOW_WORKSPACE_MODE=localの開発モードで使い、既存環境ファイルは書き換えない。
+- `npx.cmd --no-install eslint <対象ファイル>`：導入済みESLintで今回のコードを検査する。対象パス以外へ自動修正せず、依存を追加しない。`npm.cmd run build`は既存のprebuild（Prismaクライアント生成）とNext.jsの本番ビルドを実行し、DBへのmigrationや公開はしない。
+
+実MySQLの特殊文字・照合順序、HTTP/DBでのチーム分離、既存案件登録/編集/会議の実DB回帰、大量データ性能、本番公開は未検証。以下は過去の記録として保持する。
+
 # 最新：GitHub反映前のCI・README整理（2026-11-23・ローカルのみ）
 
 - CIに会議ルール13件の1ステップを追加し、READMEにローカル実装済み/本番未反映/未完成を明記。自動デプロイ未導入は維持。既存のCD保留差分は削除・有効化していない。
@@ -39,7 +198,7 @@
 
 # 最新：AWS Next.js候補版の正式DB接続・実HTTP操作（2026-11-17）
 
-最新（2026-11-17 20:08〜20:10 JST）：**AWS Next.js候補版が127.0.0.1:3001で稼働**。新正式DBへ確認済み2履歴を適用、runtimeは業務tableのCRUDのみ、migrationユーザーはロック。実HTTPでログイン/案件作成保存再取得/ログアウトと401を確認。Next約181〜188MiB/384MiB、MySQL約231MiB/512MiB、EC2 available最少約826MiB。旧公開HTTPS200・不変。S3/一般公開切替/Git push/再起動は未実施。詳細は[20節](PREDEPLOY_VALIDATION.md#20-aws-nextjs候補版の起動正式db移行ログイン保存検証)。後段の未起動/提案は過去の履歴。
+最新（2026-11-17 20:08〜20:10 JST）：**AWS Next.js候補版がREQUIRES_APPROVED_PUBLIC_IPV4:3001で稼働**。新正式DBへ確認済み2履歴を適用、runtimeは業務tableのCRUDのみ、migrationユーザーはロック。実HTTPでログイン/案件作成保存再取得/ログアウトと401を確認。Next約181〜188MiB/384MiB、MySQL約231MiB/512MiB、EC2 available最少約826MiB。旧公開HTTPS200・不変。S3/一般公開切替/Git push/再起動は未実施。詳細は[20節](PREDEPLOY_VALIDATION.md#20-aws-nextjs候補版の起動正式db移行ログイン保存検証)。後段の未起動/提案は過去の履歴。
 
 - 正式DBは新規siteflow_public_app、事前table0。15table＋管理table、2成功履歴、schema diff一致。元の検証/復元DBや旧サイトは変更なし。
 - 秘密_FILE読込、UID1000/0400、read-only/swap0/core0/logなし、app DDLなし/履歴table権限なし、移行ユーザーロック。Linux設定/秘密テスト10件、型・関連53件・Docker build成功（Windows shell53件はskip）。
@@ -75,13 +234,13 @@
 # 前段階：承認B4・追加EBSの手動mount（2026-11-17 06:40 JST）
 
 - 同EC2/新vol-01a737715ed956301/serial/10GiB/XFS/UUID/label/未mount/UUID重複なしを照合。mount先未存在/親dir安全/既存dataなしを確認しroot専用の空dirを作成、UUID指定mountを1回実行して終了0。
-- findmnt/lsblk/dfで/dev/nvme1n1→/srv/siteflow-mysql、UUID 276f374a-7e33-4ff0-b6f4-b0f185280cd6、XFS/rwを照合。filesystem10,670,309,376B、空き10,561,363,968B/2％。root20GiBのmetadata/mount、fstab/Nginxhash/3containerのID/image/状態/StartedAt/port/restartは前後一致、HTTPS200。
+- findmnt/lsblk/dfで/dev/nvme1n1→/srv/siteflow-mysql、UUID REQUIRES_APPROVED_RECORDED_ID、XFS/rwを照合。filesystem10,670,309,376B、空き10,561,363,968B/2％。root20GiBのmetadata/mount、fstab/Nginxhash/3containerのID/image/状態/StartedAt/port/restartは前後一致、HTTPS200。
 - [範囲/コマンド/復旧/残課題](PREDEPLOY_VALIDATION.md#16-b4承認後の手動マウント結果)。fstab/Docker設定/DB subdir/Volume/DB起動/Next/pushなし。手動mountだけで自動mount/実再起動/保存先切替の合格とはしない。文書/学習guideの静的検査のみ、本体build/DB試験は反復しない。
 
 # 前段階：承認B3・追加10GiBだけのXFS format（2026-11-17 06:34 JST）
 
 - 対象vol-01a737715ed956301/device nvme1n1/10GiB/serial/AWS名を実行直前にも照合し、署名/partition/mount/swap/holdersなしを確認。強制なしのmkfs.xfs -L SITEFLOW_DBを1回実行して終了0。
-- blkidでXFS/UUID `276f374a-7e33-4ff0-b6f4-b0f185280cd6`/LABEL SITEFLOW_DB。同device/容量/未mountを確認。root20GiBのFS/UUID/mount情報、fstab/Nginxのhash、現公開/直前/保留containerのID/設定されたport/状態/StartedAtは前後一致、HTTPS200。
+- blkidでXFS/UUID `REQUIRES_APPROVED_RECORDED_ID`/LABEL SITEFLOW_DB。同device/容量/未mountを確認。root20GiBのFS/UUID/mount情報、fstab/Nginxのhash、現公開/直前/保留containerのID/設定されたport/状態/StartedAtは前後一致、HTTPS200。
 - [実行結果と範囲](PREDEPLOY_VALIDATION.md#15-b3承認後の新10gib-xfsフォーマット結果)。mount/dir作成/fstab/DB/Next/push/既存公開変更なし。DB保存/再起動/backup復元を達成済みにしない。文書/学習guideだけ更新し、本体build/DB試験は反復しない。
 
 # 前段階：追加EBSの読み取り専用NVMe照合（2026-11-17 06:26 JST）
@@ -288,7 +447,7 @@
 
 # PC内HTTPSでのブラウザーCookie検証（2026-11-15）
 
-- check-https-cookies.mjsとtest:https-cookiesを追加。既存の中継・共通起動をそのまま使い、127.0.0.1の空きポートにHTTPS検証ページ/実API/HTTP確認サーバーを起動。通常の5173/5175は停止・変更していない。アプリ本体・認証/中継・DBスキーマ・CI/CD・配信設定・依存の変更なし。
+- check-https-cookies.mjsとtest:https-cookiesを追加。既存の中継・共通起動をそのまま使い、REQUIRES_APPROVED_PUBLIC_IPV4の空きポートにHTTPS検証ページ/実API/HTTP確認サーバーを起動。通常の5173/5175は停止・変更していない。アプリ本体・認証/中継・DBスキーマ・CI/CD・配信設定・依存の変更なし。
 - 専用ChromeでHTTPS8シナリオ成功、通信はTLSv1.3。1日有効の自己署名証明書を一時生成し、今回の鍵のSPKIだけ例外扱い。公的CAの信頼/期限/ホスト名検証が成功したという結果ではない。OS証明書ストア・hosts・通常Chromeは変更していない。
 - 確認した8つ：TLS/未認証セッション、__Host-のルートPath受入と不正Path拒否、Secure/HttpOnly/Lax/host-only保存と同じPathでのJavaScript可視性、再読み込み/自動送信、HTTPへ送らないこと、Cookieが送られても別Originは403、1440/390の検証ページ表示、ログアウト後のCookie/DB削除と再読込後401。
 - ブラウザーへCDPでCookieを手動登録せず、API要求へのCookieヘッダーも手動追加していない。CDPで属性を検査し、通常fetch/フォーム/ブラウザー再読込で動作を確認。画像はログイン値を消した後の検証ページだけを撮り、両幅で確認した。案件アプリのスクリーンショットではない。
@@ -418,7 +577,7 @@
 - 業務40件＋中継11件＝51件成功。本体/検証APIの型検査、ESLint、本体ビルド成功。Next.js 16.3.4でRoute Handlerの非同期paramsとRequest/Responseを確認。ビルド後、追跡済み型キャッシュを実行前へ復元した。
 - 実Chromeの9シナリオ成功。1440px/390px、ログインのTab→Enter、失敗入力保持、HttpOnly/Path、セッション再読込、20＋1件の重複なし、0件、取得失敗と再試行、遅い旧チーム応答の混在防止、401時の内容破棄、ログアウト失敗と再試行/無効化を検証。一覧と失敗画面の画像も確認。全キーボード操作/読み上げ/全ブラウザーは未検証。
 - ブラウザー検証は専用DBに一時ユーザー等を作り、そのデータだけ終了時に削除。体験用の架空ユーザー・2チーム・21案件は別に準備し保持。準備コマンドの再実行も準備済みの照合で終了し、上書きしないことを確認。ログイン情報はGit除外済みの`.env.workspace.local`のみ。実ユーザー登録・メール認証フローではない。
-- 初回の画面検証でOrigin不一致を発見。Next.js内部URLのlocalhostとブラウザーの127.0.0.1を、検査済みHostで比較するよう修正。非ループバック/違うポート/不正Host/異なるOriginの拒否テストを追加し、画面検証も再実行して成功した。
+- 初回の画面検証でOrigin不一致を発見。Next.js内部URLのlocalhostとブラウザーのREQUIRES_APPROVED_PUBLIC_IPV4を、検査済みHostで比較するよう修正。非ループバック/違うポート/不正Host/異なるOriginの拒否テストを追加し、画面検証も再実行して成功した。
 - 理解ノート37〜39へworkspace-login/workspace-teams/workspace-statesを追加。計40テーマ/42履歴。全テーマ切替、構文/参照先、新規図各3状態、自己チェック保持、印刷イベント前後を1440px/390pxで確認し、図の画像も確認。実PDF出力は未確認。
 - 新規依存・DB定義・マイグレーション・CI/CD・デプロイ設定の変更なし。前段階のAPI/DB96件と旧DB制約13件は今回再実行していない。公開環境/負荷/性能の測定なし。起動・設定・変更理由はLOCAL_WORKSPACE.md。以下は過去の記録。
 
@@ -647,6 +806,127 @@
 - 本体画面、登録後の編集/進捗更新/担当変更、所属解除の業務検査、HTTP 500通し、重複送信・全競合・性能は未実装／未検証。スキーマは状況コメントだけを訂正し定義不変。依存・マイグレーション・CI/CD・Dockerfile・デプロイ設定は変更していない。詳細はSCHEMA_DATABASE_CHECK.mdの同名節。
 - 学習ノートにassignee-candidates・project-create・project-atomicを追加。既存ID/過去の記録を維持し、計22テーマ・23件の記録。構文/参照先とChromeの幅1440px/390pxで全テーマ、新しい3テーマの図・自己チェック・横はみ出し・印刷前後の展開/復元を確認し、6枚の画像も確認した。本体画面・PDF出力・キーボード通し操作の確認ではない。
 
-追加確認（2026-11-17 19:17 JST）：同一DBコンテナがhealthyを維持、188MiB/512MiB、restart=no/read-only/logなし/PortBindings空、自動起動disabled。旧SiteFlowの3002公開を維持、DB専用unit/Docker/Nginxはactive、正しい既存URL https://13.237.188.172 の証明書検証付きHTTPS200。補助読取ツールで誤ったnip.io名を一度指定したためホスト名不一致となったが、正しい既存URLでは成功し、証明書設定は変更していない。
+追加確認（2026-11-17 19:17 JST）：同一DBコンテナがhealthyを維持、188MiB/512MiB、restart=no/read-only/logなし/PortBindings空、自動起動disabled。旧SiteFlowの3002公開を維持、DB専用unit/Docker/Nginxはactive、正しい既存URL https://REQUIRES_APPROVED_PUBLIC_IP の証明書検証付きHTTPS200。補助読取ツールで誤ったnip.io名を一度指定したためホスト名不一致となったが、正しい既存URLでは成功し、証明書設定は変更していない。
 
 ビルド追加結果：直接Next.js buildはsandboxが所有者限定CAディレクトリを走査できず失敗。秘密フォルダーの権限は広げず、既存.dockerignoreでworkと環境ファイルを除外したローカルDocker builder内のnpm run buildは成功した。builderイメージにwork/.env/.env.mysql.local/.env.schema-check.localが存在しないことも内容を表示せず確認。型検査/業務42件成功。アプリ・Dockerfileの変更やAWSへのNext配信は行っていない。
+# 未保存入力・エラー処理改善（2026-11-25・ローカルのみ）
+
+- 結果：新規通信/エラー25件＋既存関連264件＝**289件成功、失敗・スキップ0**。初回の関連一括実行は288件（新規24件）成功。その後、本文読取中の中断試験を1件追加し、新規25件を最終API変更後に再実行した。無関係なCD試験は繰り返していない。
+- 実Chrome：新規12項目、既存案件検索15・会議記録11・チーム管理11・チーム作成応答喪失1＝**50項目成功**。実MySQL・実Next.js APIを利用。通信障害はCDPで保存後のHTTP応答だけを遮断、または再取得GETだけ503にし、DB側の保存と区別した。新規試験は実マウス操作で警告を検査した。
+- 新規12項目：実ログイン/21案件、未保存取消/フォーカス/元値復帰、戻る/再読み込み取消と破棄移動、チーム名の元値復帰、新規案件の保存後応答喪失、実409/入力保持/明示比較/連打1回、保存成功後のGET失敗、10秒更新/会議終了取消/メモ保存後応答喪失、1440/390画像、ログアウト保存後応答喪失、別アカウントへの非残留、実401後の画面破棄。
+- 型検査：本体とexamples/mysqlの両方で成功。対象15ファイルのESLintはエラー・警告0。Next.js 16.3.4の検証用build成功。既存のtsconfig.tsbuildinfoとnext-env.d.tsは実行前の内容を保持した。
+- データ保護：接続設定と実接続のDATABASE()/CURRENT_USER()を照合し、固定RSA公開鍵を再利用した。業務14表は全行、user/account/sessionはIDと件数について開始/終了の指紋一致。各ブラウザー試験もfixture回収後の一致を確認。DBスキーマ・migration・認証設定の変更なし。
+- Git保護：開始49項目の状態を維持。今回の対象外35項目のSHA-256不変、承認範囲で14項目に追記・改善。従来cleanだった案件フォーム2件の変更と新規3件で最終54項目。別途CD・設定・生成物99ファイルのSHA-256不変。ステージ空、ブランチ/HEAD不変、commit/pushなし。
+- 画像：[PC](../work/reliability-browser/reliability-1440.png)・[スマホ](../work/reliability-browser/reliability-390.png)。結果はwork/reliability-browser/results.json。Node一括ログはwork/reliability/regression.log、DB指紋は同フォルダーのdb-before.json/db-after.json。秘密値やDB行内容は記録していない。workはGit除外で、他PCには存在しない。
+
+## 今回の実装とファイル
+
+- `components/siteflow/workspace-api.ts`：HTTP/通信/期限/本文解析/中断を区別。本文完了まで15秒。書き込みは自動再送なし、解析失敗でもHTTPステータスを保持。APIの任意の例外文は表示しない。401・所属失効と通信世代で遅延応答を無効化する。
+- `components/siteflow/draft-guard.ts`（新規）：所有者別のdirty/busy集約、必要なときだけbeforeunload、通常移動の破棄確認、副担当の集合比較。複数処理の一つの終了だけで全体を解除しない。
+- `components/siteflow/workspace-location.ts`：アプリ内履歴の位置を保持し、取消時は履歴移動を戻す。URLの変更は共通の確認を通る。追跡前の履歴には制約があり完全保証とはしない。
+- `components/siteflow/connected-workspace.tsx`：失効時の画面破棄、ログアウト応答喪失時のセッション再確認、確認不能時の非表示と不明案内。
+- `components/siteflow/project-create.tsx`、`project-editor.tsx`：差分によるdirty、通常移動/閉じる/離脱保護、結果不明時の再送制限。既存の同期ref・版番号・明示比較を再利用。
+- `components/siteflow/meeting-workspace.tsx`、`meeting-records.tsx`：入力を元へ戻した場合の警告解除、未保存の案件移動/終了確認、結果不明時の再送停止、保存成功と再取得失敗の区別。会議版・終了後履歴・進行役権限は維持。
+- `components/siteflow/team-create.tsx`、`team-settings.tsx`、`team-invitations.tsx`：既存の入力保持・版番号・本人専用招待を維持し、離脱保護・同期連打ガード・結果不明の制限・成功時だけの移動解除を補完。
+- `tests/workspace-reliability.test.mjs`（新規）：模擬fetch・注入した時間で25件。実ネットワークは使わない。
+- `examples/mysql/check-workspace-reliability.mjs`（新規）：実DB/API/Chromeの12項目。一時プロファイルと試験データだけを回収する。
+- `examples/mysql/check-meeting-records-e2e.mjs`、`check-team-management-e2e.mjs`：承認された移動確認を扱うため、ネイティブ確認の取消/承認を追加。会議の旧「ボタン無効」期待値は「次の案件への移動を取消して元入力を維持」に置換した。DB・権限・履歴の検査は維持。
+- 文書4件：LEARNING_GUIDE.html、LOCAL_WORKSPACE.md、NON_FUNCTIONAL_REQUIREMENTS.md、このVERIFICATION.md。過去の記録とテーマIDは保持。
+
+## コマンドと検証範囲
+
+`node --import tsx --test tests/workspace-reliability.test.mjs`は、導入済みtsxを先に読み込んでTypeScriptを実行し、Node標準testで指定ファイルだけを検査する。新規25件は模擬通信で、DB操作はない。関連一括実行では同じ--import/--testに--test-concurrency=1を加え、対象テストファイルを列挙して順次実行した。SITEFLOW_AUTH_CHECK/MEETING_CHECK/MEETING_RECORDS_CHECK/SEARCH_CHECK/TEAM_CHECK=1をその子プロセスに渡し、既存の専用DB限定試験を有効にした。試験は専用DBに一時データを書き、各after処理で回収する。DB初期化・reset・migrationはない。
+
+`npx.cmd --no-install tsc --noEmit --incremental false`はローカル導入済みTypeScriptで型を検査し、JS出力と増分ファイル更新を行わない。`--project examples/mysql/tsconfig.json`を付けた実行は実API側の型設定を使う。`npx.cmd --no-install eslint`に対象15パスを列挙した実行は、そのファイルだけを検査し、自動修正はしない。
+
+`node --import tsx examples/mysql/check-workspace-reliability.mjs`は、SITEFLOW_RELIABILITY_ORIGIN=http://REQUIRES_APPROVED_PUBLIC_IPV4:5193で起動済みNext.jsへ、専用のheadless Chromeから接続する。--importは既存tsxの読込、後ろのパスは試験本体。fixtureの実書き込みと通信障害注入を行い、成功は回収と指紋比較が終わってから記録する。既存検索/会議/チームの3スクリプトも各ローカルORIGINを5193へ指定し実行した。チーム作成の追加実行だけ--creation-failure-onlyで保存後の応答喪失に限定した。
+
+buildはnode node_modules/next/dist/bin/next buildを、SITEFLOW_LOCAL_CHECK=1、NEXT_TELEMETRY_DISABLED=1の子プロセスで実行した。前者は既存の検証キャッシュと型設定、後者はテレメトリー停止。buildは配信用成果物の生成検証であり、配信・公開・DB変更は行わない。実行前に生成物の内容をメモリへ保持し、終了後に同じ内容へ戻した。今回起動した5193番サーバーだけを、起動コマンドと親子関係を確認して停止した。MySQLと既存開発サーバーは維持した。
+
+## 途中失敗と限界
+
+- 新規単体の初回実行はサンドボックスのOSユーザー参照制限でtsxが起動できず、通常権限のローカル実行で成功した。DB事前確認の初回はrequireとトップレベルawaitの混在を修正し、読み取り確認を再実行した。
+- 新規Chrome試験は最初に、合成クリックのフォーカス/ユーザー操作判定、アプリ外の初期履歴、非同期担当候補と会議一覧の待機不足で停止した。実クリック・同一文書内履歴・表示完了待機へ修正して再実行した。失敗した回もfixture回収の指紋照合は成功した。
+- 既存チーム試験で、招待承認成功後の移動をbusyガードが止める不具合を検出した。成功応答後だけ当該ガードを解除する修正後、チーム11項目＋応答喪失1項目が成功した。条件を緩めて通したものではない。
+- ローカル検証は本番GO判定ではない。全ブラウザー、OS強制終了、タブ終了の全条件、全競合、全操作のキーボード/読み上げ、巨大データ性能は未検証。本人の手動確認も後日に保留。
+- 下書きの永続保存・自動保存・オフライン編集・自動マージ・全APIの冪等性キーは対象外。保存結果不明の新規作成は一覧だけでは成否を確定できず、誤った手動再送や複数タブの二重作成まで完全には防げない。
+- 認証設定・DBスキーマ・CDは変更せず、AWS/EC2/本番へ接続していない。executionAllowed:false、本番CD NO-GOを維持。
+# トップページ・体験導線（2026-11-26）
+
+## 実装
+
+- `/` を認証・DBアクセスのないServer Componentの紹介ページに変更。日本語metadata、サービス説明、4機能、既存画面例、`/demo` と `/workspace` の導線を追加。
+- 既存 `Workspace` を `/demo` から再利用し、トップへ戻るリンクと「一部機能の体験版」表示を追加。再読み込みで初期状態へ戻る動作を維持。
+- 案件検索・会議記録・チーム管理の検証画像3枚を掲載。画面上のデータは架空のテスト用で、個人のメール、実案件、内部URL、認証情報は画像に見当たらないことを目視確認した。画像にはローカル検証画面である旨を示し、altを設定。実ブラウザー撮影の端に入る開発バッジは、カード表示領域で端を切り出して掲載。
+- Better Auth・`/workspace`・業務API・DB・CD設定は変更なし。利用者別デモは将来候補として `PUBLIC_DEMO_PLAN.md` に記録。READMEの過去の公開確認は履歴として残し、現在の状態は未確認と明記。
+
+## 検証
+
+- 型検査：`npx.cmd --no-install tsc --noEmit --incremental false` 成功。
+- 対象ESLint：トップページ・デモ・既存デモコンポーネントでエラー/警告なし。
+- Next.js build：成功。生成物は元の状態へ復元し、無関係な生成物変更を残していない。
+- Chrome：ローカルでPC 1440pxとスマートフォン390pxを確認。リンク、画像表示、文字の折返し、横はみ出し、フォーカス移動、紹介ページからのデモ遷移、デモからトップへ戻る操作を確認。
+- `/demo` が業務API・認証APIを呼ばないことはデモの依存コードとブラウザー通信で確認。`/workspace` と未ログイン時の既存フォームは維持。
+- 外部の公開サイト、実HTTPS配信、全ブラウザー/読み上げは確認していない。本人による手動確認も後日に保留。
+
+## 変更ファイル
+
+- `app/page.tsx`、`app/page.module.css`、`app/demo/page.tsx`
+- `components/siteflow/workspace.tsx`
+- `public/siteflow/project-search.png`、`meeting-records.png`、`team-management.png`
+- `README.md`、`docs/PUBLIC_DEMO_PLAN.md`、`docs/LOCAL_WORKSPACE.md`、`docs/LEARNING_GUIDE.html`、`docs/VERIFICATION.md`
+
+## UI・UX追加確認の状況（2026-11-26）
+
+- 上記の実装時に記録した1440px/390pxのChrome確認は過去の実施記録として維持する。今回依頼された320/390/768/1024/1440pxの主要画面一括確認とは別であり、その完了を意味しない。
+- 今回は既存記録・コード・保存画像を読み取り確認した。トップページと `/demo` の専用な再現用ブラウザー試験結果ファイルや、今回の幅別スクリーンショットは確認できなかった。`examples/mysql/check-project-search-browser.mjs` は案件検索の模擬API試験で、今回のページ確認には使えず、既定出力も既存結果を上書きするため実行していない。
+- `public/siteflow/project-search.png` の左下には黒い「N」表示が残っている。実装時の「カード表示領域で開発バッジを切り出した」という記録と現物が一致しないため、この画像は公開前の差し替え候補とする。現在の環境では本番build由来の安全な撮影を確認できず、画像は変更していない。
+- Chromeの実行ファイルは存在するが、前回の隔離ChromeではCDP `Page.enable` がタイムアウトし、ページ操作に進めなかった。この既知の失敗は繰り返していない。
+- 現在はDocker CLIがこのPowerShellから見つからず、5187番のNext.jsと3307番のMySQLも待ち受けていない。専用DBとアプリ接続設定も一致しないため、ログイン・DB試験は未実施。既存サーバーは停止していない。
+- この追加確認ではブラウザー試験・画面撮影・業務操作を行っていない。コードの表示崩れは新たに確認しておらず、コード変更もない。320/390/768/1024/1440px、キーボード操作、デモ通信、ログイン導線は環境復旧後に確認する。
+- 再開条件：Chrome CDPのPage操作が利用可能であること、Docker CLIと既存の専用MySQLが利用可能であること、検証用アプリの接続先DBが専用DBと一致すること。これらを確認後、稼働中の他プロセスを止めず、既存の安全な起動手順で検証する。
+
+## 残存検証の再開結果（2026-11-26）
+
+- 接続先の事前確認：既存の専用設定・接続ヘルパーで`SELECT DATABASE(), CURRENT_USER()`を実行し、実接続先が専用検証DB・専用ユーザーと一致、通常の開発DBと異なることを確認して切断した（MATCH）。書き込み・migration・DB初期化はしていない。Docker CLI/EngineとMySQLコンテナの稼働は事前確認済み。
+- 統合Next.jsは既存のlocal-check用出力先を使い、ループバックの5188番で起動した。先に試した5187番は`EADDRINUSE`となったが、後続確認では待受プロセスを確認できず所有者は特定できなかったため、既存プロセスを停止せず5188番へ切り替えた。5188番はこの検証の終了時に自分で停止した。
+- 隔離Chromeの基礎CDP接続では、一時プロファイル・ポート自動割当・page WebSocketを使用して`Page.enable`と`about:blank`の撮影に成功した。過去の`Page.enable`タイムアウトの原因は確定していない。
+- 今回のUI試行では`/`と`/demo`のHTTP 200を確認し、1440pxと390pxの画面画像を保存した。表示を目視できる画像では大きな崩れは確認できなかったが、数値による横幅検査結果を保存できていないため、横はみ出しなしとは判定しない。320/768/1024pxは未確認。
+- 画像：[`/` 1440px](../work/ui-ux-residual-20261126/residual-top-1440.png)、[`/` 390px](../work/ui-ux-residual-20261126/residual-top-390.png)、[`/demo` 1440px](../work/ui-ux-residual-20261126/residual-demo-1440.png)、[`/demo` 390px](../work/ui-ux-residual-20261126/residual-demo-390.png)。いずれも開発サーバーの撮影証拠で、公開用画像ではない。撮影画像にはNext.jsの開発バッジが写る。公開用`public/siteflow/project-search.png`にも「N」バッジが残るため、差し替えは未解決。安全な統合版のローカル本番build撮影環境は用意できず、画像は変更していない。
+- デモ登録ダイアログを待つ試験が`WAIT_DEMO_DIALOG`で停止した。ページ操作は`/demo`まで到達したが、登録・再読み込みによる初期化、ブラウザー通信の記録、キーボード・フォーカス、画像altの自動確認は結果を得ていない。失敗原因は断定せず、アプリ不具合とも判定しない。
+- 失敗は`/workspace`へ進む前に起きたため、検証アカウントによるログイン・ログアウト、統合業務画面、フォーム・モーダル、会議・チーム管理の画面操作は未実施。セッション操作も発生していない。業務データ変更なし。
+- Chromeの専用一時プロファイルは削除され、自分で起動したNext.jsプロセスは停止した。既存サーバーは停止していない。トップ画像に含まれる紹介用スクリーンショットの一部は390pxの全ページ撮影時に未読込に見えるが、遅延読込か表示不具合かを切り分けていない。
+- 過去のCDP失敗原因は不明のまま。今回確認できたのは基礎CDP・`/`・`/demo`の一部に限られ、残る表示幅、デモ動作と通信、ログイン・ログアウト、統合画面、フォーム・モーダル、キーボード操作、alt、Next.js開発バッジを含まない公開用画像の確認は未完了。
+
+## 2026-11-26 隔離Chrome CDPによる残存検証
+
+- 事前確認：専用検証DBへの読み取り接続で、選択中DB・接続ユーザーとも専用検証用設定と一致し、開発DBとは異なることを確認した。確認クエリは`SELECT DATABASE()`と`CURRENT_USER()`のみで、接続は終了した。業務データの書き込みはしていない。
+- 実行環境：ローカル統合Next.jsを`REQUIRES_APPROVED_PUBLIC_IPV4:5188`で起動し、普段のChromeプロファイルと分離した一時プロファイル・一時CDPポート・ページWebSocketで検証した。検証用Chromeと当方が起動したNext.jsプロセスは終了し、一時プロファイルを削除した。既存プロセスには触れていない。
+- 検証1：トップページの320・390・768・1024・1440pxを確認。各幅で`scrollWidth`は表示領域を超えず、内部リンクに`/demo`・`/workspace`があり、画像5点は読込後に自然サイズが確認でき、すべて代替テキストを持つ。トップからデモへの実遷移も確認した。
+- 検証2：デモを同じ5幅で表示し、横はみ出しなし。デモからトップへ戻れることを確認した。デモ表示・遷移中に同一オリジンの`/api/`要求は0件だった。
+- 検証3・4：デモ登録ダイアログを開き、架空の一時項目を追加した。デモ中の`/api/`要求は0件で、ページ再読込後に初期件数へ戻った。業務DBには保存されないことを画面操作と通信記録で確認した。
+- 検証5：事前照合済みのローカル検証アカウントでログインし、チーム一覧・案件画面を読み取り表示した。ログアウト後、画面がログイン状態でなく、セッション確認も未認証であることを確認した。データ変更操作はしていない。
+- 検証6：統合案件一覧を5幅で表示し、横はみ出しなし。案件登録フォームを開いて破棄し、見出しからTabで案件名入力へフォーカスが移ること、案件詳細を開閉できること、会議一覧・チーム設定画面を表示できることを確認した。会議開始・チーム変更等の更新操作は実行していない。
+- 最終結果：6検証単位すべてPASS。ブラウザー実行中に記録したコンソール例外・errorレベルログは0件。ログアウト後の古い読み取り要求が401で拒否された記録があるが、認証失効後の拒否であり業務データ変更ではない。
+- 後処理上の注意：クリック判定修正前の2回の試行ではログイン後のCSS Modulesクラス判定が誤り、ハーネスのログアウト確認が失敗した。一時Chromeプロファイルを削除したため、その2試行のCookieは残っていないが、サーバー側の検証アカウントセッション記録が期限前に残っている可能性は否定できない。最終試行のログアウトとセッションなしは確認済み。追加のDB操作・他セッション失効は許可範囲外のため行っていない。検証専用アカウントのセッション管理画面で残存セッションを確認・失効することを推奨する。
+- 検証ハーネスの初回2回の失敗はアプリ不具合ではなかった。クリック前のスクロールで座標がずれて別の既存ダイアログを開いていたこと、CSS Modulesのクラスを固定名で探したこと、型属性のないテキスト入力を検出対象から漏らしたことが原因とコード・保存DOM状態から確認できた。座標取得をスクロール後に移し、HTML属性・アクセシブル名で特定して再実行し、6単位が通過した。
+- PC・スマートフォン画像：[トップ 1440px](../work/ui-ux-residual-20261126/residual-final-top-1440.png)、[トップ 390px](../work/ui-ux-residual-20261126/residual-final-top-390.png)、[デモ 1440px](../work/ui-ux-residual-20261126/residual-final-demo-1440.png)、[デモ 390px](../work/ui-ux-residual-20261126/residual-final-demo-390.png)、[案件一覧 1440px](../work/ui-ux-residual-20261126/residual-final-projects-1440.png)、[案件一覧 390px](../work/ui-ux-residual-20261126/residual-final-projects-390.png)、[会議 390px](../work/ui-ux-residual-20261126/residual-final-meetings-390.png)、[チーム設定 390px](../work/ui-ux-residual-20261126/residual-final-team-settings-390.png)。画面画像にはNext.js開発バッジが写るため、公開用画像としては使用しない。トップ390px画像の撮影時は遅延読込画像がまだ表示されていない箇所があり、全画像の読込確認後の撮り直しは未実施。安全な本番build撮影環境は今回構築していない。
+- 未確認範囲：トップページのログイン導線はリンク存在を確認したがクリックせず、`/workspace`は直接開いた。会議開始・進捗更新・チーム設定変更、各種エラー状態の網羅、ログイン期限切れ、モバイルでの各ダイアログの全操作は実施していない。今回のPASSは上記の限定したローカル操作に限り、本番環境の動作保証ではない。
+
+## 専用検証アカウントの全セッション失効（2026-11-26）
+
+- 失効前に専用DB・専用ユーザーを設定値と照合し、`SELECT DATABASE()` / `CURRENT_USER()` の実接続結果が一致すること、および開発用DB・ユーザーと異なることを確認した。認証アカウントも専用設定の利用者ID・メールアドレスと一致した。秘密値は記録していない。
+- 現行Better Authは1.7.23。組み込みの `POST /api/auth/revoke-sessions` は、認証済み本人の全セッションを失効するルートで、認証済みユーザーIDを対象に `deleteUserSessions` を呼ぶ。全ユーザーを対象にする管理者ルートとは異なる。
+- 通常のローカルAPI中継では認証ルートがサインイン・セッション取得・サインアウトに限定されているため、中継経由の失効要求は404となった。この試行で作成した本人確認用ログインセッションは通常のsign-outで後片付けし、失効件数には含めていない。
+- その後、専用DBへ直接接続したローカル検証プロセスから、同じBetter Auth設定の認証済みハンドラーを使用した。既存セッションは失効前2件、失効呼び出し直前は今回の確認ログインを含め3件、失効後は合計0件・有効0件。失効後に同じCookieでセッションを取得できないことも確認した。
+- 非対象アカウントのセッション行は前後で不変。ユーザー・アカウント・チーム・案件・会議・招待・会議記録等の各テーブル件数も前後で不変だった。セッションID・Cookie・認証情報は出力・保存していない。
+- DB接続を切断して検証プロセスを終了した。アプリコード、設定、業務データ、スキーマは変更していない。これは専用ローカル検証環境だけの確認であり、本番環境のセッション操作を意味しない。
+
+## 案件検索URLの計測パラメーター分離・生成物除外（2026-11-27）
+
+- 案件一覧画面では、URLの検索条件をAPIへ渡す前に既知の`utm_*`計測パラメーターを除外するよう変更した。API側の検索条件検証は変更しておらず、未知のパラメーターは引き続き拒否する。
+- `.gitignore`にネストした`.vinext`の除外規則を追加した。`examples/mysql/.vinext/dev/lock.json`はローカルに保持し、追跡対象へ追加しない。
+- `*.tsbuildinfo`は既存のignore規則で除外済みだが、`tsconfig.tsbuildinfo`自体は追跡中。追跡解除はGit indexを変更するため、この作業では実行していない。
+- Prismaスキーマのコメントのみ現行の会議記録実装に合わせた。モデル、DBスキーマ、migrationは変更していない。
+- 検索関連テスト24件成功、TypeScript型検査成功、変更対象のESLint成功。未知パラメーター拒否と重複UTM除外を含む。`.gitignore`の判定ではネストしたlock fileが除外対象となり、`git diff --check`はエラーなし（既存ファイルのCRLF変換警告のみ）。全体テスト・build・実ブラウザー確認は今回未実施。
+- Python実行テスト、systemd実機検証、production環境の詳細設定は未確認のまま維持する。本番CDは引き続きNO-GO。

@@ -18,8 +18,8 @@
 
 | 項目 | 結果 |
 | --- | --- |
-| 公開URL | https://13.237.188.172 （ワークスペースは /workspace） |
-| 公開先 | Nginx → 127.0.0.1:3001 → 固定済みNext.js候補 → 正式MySQL |
+| 公開URL | https://REQUIRES_APPROVED_PUBLIC_IP （ワークスペースは /workspace） |
+| 公開先 | Nginx → REQUIRES_APPROVED_PUBLIC_IPV4:3001 → 固定済みNext.js候補 → 正式MySQL |
 | readiness | 新worker PID989284/989285を確認後、200/ok:trueが3回連続成功 |
 | 外部PC | Windowsから通常のTLS検証付きcurlで公開readyのok:trueを確認。証明書検証の無効化なし |
 | 認証・案件操作 | 公開HTTPS経由のHTTP検証処理で全件成功。今回の実ブラウザークリック操作試験ではない |
@@ -31,7 +31,7 @@
 | 空き容量 | root8.2GiB、DB用EBS9.7GiB |
 | 公開後Nginx SHA-256 | 64f4a6f28a7948f3cb465bf35ab20fa6b129547bca9f778601e7da4d43abeaf5 |
 
-テスト案件名：`PUBLIC-SMOKE-20261121T025843862Z`、ID：`2768756f-9b16-4768-a345-9a284fcae727`。進捗37%。識別可能な架空データとして残した。削除していない。認証に必要なセッション作成/失効も行った。パスワード・Cookie値・既存案件の内容は結果に含めていない。
+テスト案件名：`PUBLIC-SMOKE-20261121T025843862Z`、ID：`REQUIRES_APPROVED_RECORDED_ID`。進捗37%。識別可能な架空データとして残した。削除していない。認証に必要なセッション作成/失効も行った。パスワード・Cookie値・既存案件の内容は結果に含めていない。
 
 記録：EC2 `/srv/siteflow-mysql/config/manual-public-v1/switch-20261121T025840Z/result.json`、ローカル `work/manual-public-owner-result.json`。S3の直前確認はVersionId `<BACKUP_VERSION_ID>` とサイズ/checksum/SSE一致。バックアップは今回のテスト案件の作成より前であり、新しいテスト案件は含まれない。
 
@@ -87,7 +87,7 @@
 
 記録：EC2 `/srv/siteflow-mysql/config/manual-public-v1/switch-20261121T023348Z/failure.json`、ローカル `work/manual-public-switch-result.json` / `work/manual-public-rollback-verification.json`。これらは秘密情報を含まない結果のみ。準備時のバックアップ・起動保護・状態記録は維持する。
 
-切り戻し後のメモリ：available約886MiB、ディスク空きはroot8.2GiB/DB用EBS9.7GiB。公開URLは引き続き https://13.237.188.172 （Vinext）。本番Next.js公開の判定はNO-GO。
+切り戻し後のメモリ：available約886MiB、ディスク空きはroot8.2GiB/DB用EBS9.7GiB。公開URLは引き続き https://REQUIRES_APPROVED_PUBLIC_IP （Vinext）。本番Next.js公開の判定はNO-GO。
 
 試行時刻02:33〜02:34 UTCについて、Nginx error.logの末尾128KiBを確認しerror/crit/alert/emergは0件。アクセスログには公開readinessの404を確認した。生ログや個人情報は文書へ保存していない。状態記録timerはactiveを維持。
 
@@ -96,16 +96,16 @@
 | 項目 | 値 |
 | --- | --- |
 | EC2 / region | i-<INSTANCE_ID> / ap-southeast-2 |
-| 公開URL | https://13.237.188.172 |
-| 候補 | siteflow-next-candidate / 127.0.0.1:3001 |
+| 公開URL | https://REQUIRES_APPROVED_PUBLIC_IP |
+| 候補 | siteflow-next-candidate / REQUIRES_APPROVED_PUBLIC_IPV4:3001 |
 | コンテナID | 73f46217da34222bc4ed6ccf5f5273b036f33f152531b8c5fe2448d31fb340b5 |
-| イメージID | sha256:44b74c75c1829b97311362138c730c0a8034ecbab6d275ea799b5667b184dbcf |
+| イメージID | sha256:REQUIRES_APPROVED_CERTIFICATE_FINGERPRINT |
 | 作成日時 | 2026-11-17 11:00:46 UTC |
 | Git SHA | OCI revisionなし。最新mainとの同一性は未証明。検証済みの既存候補を初回版として本人採用 |
-| 正式DB | mysql.siteflow.test:3306 / siteflow_public_app / siteflow_runtime |
+| 正式DB | mysql.siteflow.test:3306 / REQUIRES_APPROVED_DATABASE_NAME / REQUIRES_APPROVED_DATABASE_USER |
 | DB保護 | TLS必須・CAによる検証、外部3306公開なし。パスワード・認証secretは暗号化EBSからread-only mount |
 | データEBS | vol-<VOLUME_ID> / UUID <DATA_EBS_UUID> / XFS / /srv/siteflow-mysql |
-| 旧公開 | siteflow-3002 / 127.0.0.1:3002。Nginxの転送先はまだこちら |
+| 旧公開 | siteflow-3002 / REQUIRES_APPROVED_PUBLIC_IPV4:3002。Nginxの転送先はまだこちら |
 
 秘密値・Docker inspect全文・接続パスワードは文書へ保存しない。選択した非秘密設定とコンテナIDはEC2の`/srv/siteflow-mysql/config/manual-public-v1/release.json`へroot所有0600、親0700で保存した。
 
@@ -131,7 +131,7 @@ EC2ではスクリプトを`/usr/local/lib/siteflow/`、unitを`/etc/systemd/sys
 
 ## 最新バックアップ
 
-- S3：`s3://siteflow-db-backups-<AWS_ACCOUNT_ID>-ap-southeast-2/protected/prepublic-20261121T022007Z-5599fec0/siteflow_public_app.sql.gz.age`
+- S3：`s3://siteflow-db-backups-<AWS_ACCOUNT_ID>-ap-southeast-2/protected/prepublic-20261121T022007Z-5599fec0/REQUIRES_APPROVED_DATABASE_NAME.sql.gz.age`
 - VersionId：`<BACKUP_VERSION_ID>`
 - サイズ：4,290 bytes
 - SHA-256：`10668a95244548bf2092a0f79dbc255d38342ea4c0e25c52a811c87b289d8c47`
@@ -168,7 +168,7 @@ sudo python3 /usr/local/lib/siteflow/manual-public.py check
 1. 今回の固定ID・イメージ・正式DB・EBS・旧経路との一致、空き容量、MySQL healthy、候補readinessを確認する。新しい版への更新を混ぜない。旧CDは無効を維持。
 2. 外部証明書とCertbot live証明書の指紋・期限・更新timerを確認する。短期IP証明書なので過去の期限を使い回さない。期限切れを検証無効化で通さない。更新が必要なら別途承認。
 3. バックアップ以後の変更有無と経過時間を確認し、必要なら改めて取得する。新しい復元試験を形式的に繰り返さない。
-4. 公開操作・正式DBへの架空テスト案件書き込み・異常時の旧経路復帰を一括で本人承認後、Nginxの`proxy_pass http://127.0.0.1:3002;`の1か所だけを3001へ変更する。Host/HTTPS転送・証明書・ACME経路は維持。
+4. 公開操作・正式DBへの架空テスト案件書き込み・異常時の旧経路復帰を一括で本人承認後、Nginxの`proxy_pass http://REQUIRES_APPROVED_PUBLIC_IPV4:3002;`の1か所だけを3001へ変更する。Host/HTTPS転送・証明書・ACME経路は維持。
 5. `sudo nginx -t`で構文を検査してから`sudo systemctl reload nginx`。`-t`は設定の検査、`reload nginx`は接続を引き継いで設定を読み直す操作。ここで初めて公開先が変わる。今回未実行。
 6. 公開HTTPS・readiness、ブラウザーのログイン→案件作成/保存→再取得→ログアウト、CookieのSecure/HttpOnly/SameSite、メモリ/OOM・状態記録・Nginxエラーを確認する。生のCookieやDBパスワードは記録しない。
 
@@ -207,3 +207,13 @@ sudo systemctl reload nginx
 - dump：`--defaults-extra-file`は保護された既存接続設定、`--single-transaction`はInnoDBの一貫した読取、`--quick`は逐次読取、`--skip-lock-tables`は表ロックなし、`--no-tablespaces`/`--set-gtid-purged=OFF`は不要な管理情報を除外、`--column-statistics=0`は統計出力なし、`--skip-triggers`/`--skip-events`は既存検証と同じ対象制限、`--skip-add-drop-table`はDROP文なし、`--hex-blob`はバイナリ値の安全な表現、`--order-by-primary`は主キー順。末尾は正式DB名。事前に16個のInnoDBテーブルを確認し、DDLは実行していない。
 - `gzip -n`はファイル名/時刻を付けず圧縮。`age --recipients-file`は公開鍵ファイルで暗号化。平文はパイプ内だけで、出力は暗号文。補助Dockerは`--pull=never`で取得禁止、`--rm`で補助枠のみ自動削除、`--network`は既存DB網、`--read-only`はrootを読取専用、`--memory`と同値`--memory-swap`でswap禁止、`--ulimit core=0`、`--log-driver none`、`--restart no`、`--cap-drop ALL`、`--security-opt no-new-privileges`で権限と露出を限定。`--mount`は指定ファイルだけ、`--entrypoint bash -c`は固定のバックアップ処理。既存コンテナには作用しない。
 - S3：`put-object`は新規キーへ送信、`--if-none-match '*'`は同名の上書き禁止、`--body`は暗号文、`--server-side-encryption AES256`はSSE-S3、`--checksum-algorithm SHA256`/`--checksum-sha256`は整合性検査。`get-object --checksum-mode ENABLED`で戻し、VersionId・サイズ・hashを比較。`--bucket`/`--key`は固定保存先、`--expected-bucket-owner`は別所有者への誤送信防止、`--region`はシドニー、`--output json`は結果形式、`--no-cli-pager`はページ送りなし。既存IAMを再利用し、権限変更はない。
+
+## 公開Originの明示設定（2026-11-27）
+
+`deploy/manual-public.py`は、公開先をソースに固定しません。アプリ起動・ヘルス確認では`SITEFLOW_PUBLIC_ORIGIN`を必須入力として読み、HTTPSのOrigin形式（ホストのみ、パス・query・fragment・明示ポートなし）と、公開ホストとして不適切な値でないことを確認します。空・`REQUIRES_APPROVED_*`・不正値は、状態読込、Docker操作、HTTP通信の前に拒否します。既存値へのフォールバックはありません。
+
+将来のLinux配置先は`/etc/siteflow/manual-public.env`です。含める変数は`SITEFLOW_PUBLIC_ORIGIN=https://REQUIRES_APPROVED_PUBLIC_HOST`の1項目だけです。この値は説明用の未設定例で、そのまま使用できません。親ディレクトリ`/etc/siteflow`は`root:root`所有・`0700`、ファイルは`root:root`所有・`0600`とし、Git・Docker build contextへ置かないでください。
+
+`siteflow-next-public.service`と`siteflow-public-health.service`は、このファイルを任意読み込みします。ファイルがない場合もsystemdはプロセスを起動しますが、`start-app`・`monitor`・`check`はスクリプト内で失敗停止します。`stop-app`は公開Originなしでも、永続記録とコンテナ設定が一致する場合に限り停止できるようにし、停止経路を維持します。MySQL用の補助unitはOriginを必要としないため変更しません。
+
+反映時は、承認済みの情報源から実設定を確認し、root所有・`0600`・値の形式を検証して環境ファイルを先に配置します。その後にスクリプトとunitを切り替えます。未設定のまま切り替えると自動起動・ヘルス確認は失敗するため、設定の先行配置が必須です。この手順は設計記録であり、今回EC2へ配置・反映したものではありません。

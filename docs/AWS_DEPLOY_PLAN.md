@@ -7,7 +7,7 @@
 最新（2026-11-17 21:21 JST）：**PC実Chromeの非公開HTTPSでログイン・案件保存35％・再読み込み・ログアウトに成功**。証明書dry-run/再読込hook/通常renew正常（実証明書の期限延長なし、11月21日15:26 JST）。候補だけの停止再開と保存保持も成功、旧Vinext/Nginxルーティング維持・HTTPS200。S3/IAMは承認待ち、GitHub production未作成、CD/公開経路変更はローカル準備のみ。詳細は[21節](PREDEPLOY_VALIDATION.md#21-公開前準備証明書非公開ブラウザー復旧cd)。後段は過去の履歴を含む。
 
 
-最新（2026-11-17 20:08〜20:10 JST）：**AWS Next.js候補版が127.0.0.1:3001で稼働**。新正式DBへ確認済み2履歴を適用、runtimeは業務tableのCRUDのみ、migrationユーザーはロック。実HTTPでログイン/案件作成保存再取得/ログアウトと401を確認。Next約181〜188MiB/384MiB、MySQL約231MiB/512MiB、EC2 available最少約826MiB。旧公開HTTPS200・不変。S3/一般公開切替/Git push/再起動は未実施。詳細は[20節](PREDEPLOY_VALIDATION.md#20-aws-nextjs候補版の起動正式db移行ログイン保存検証)。後段の未起動/提案は過去の履歴。
+最新（2026-11-17 20:08〜20:10 JST）：**AWS Next.js候補版がREQUIRES_APPROVED_PUBLIC_IPV4:3001で稼働**。新正式DBへ確認済み2履歴を適用、runtimeは業務tableのCRUDのみ、migrationユーザーはロック。実HTTPでログイン/案件作成保存再取得/ログアウトと401を確認。Next約181〜188MiB/384MiB、MySQL約231MiB/512MiB、EC2 available最少約826MiB。旧公開HTTPS200・不変。S3/一般公開切替/Git push/再起動は未実施。詳細は[20節](PREDEPLOY_VALIDATION.md#20-aws-nextjs候補版の起動正式db移行ログイン保存検証)。後段の未起動/提案は過去の履歴。
 
 
 最新（2026-11-17 19:40 JST（10:40 UTC））：AWS上の架空DB backup→別空DB restoreの定義/全行/整合性一致、アプリ用最小CRUD・TLS必須・他DB/DDL拒否、Next.jsと同じ接続設定/Prisma adapterで正常TLSと不正CA/誤名/平文拒否を確認。MySQL約205MiB/512MiB、host最少約891MiB、旧公開HTTPS200。**実Next HTTP候補/Prisma migration/EC2外backupは未実施。** 詳細・残作業・S3承認案は[検証19節](PREDEPLOY_VALIDATION.md#19-awsでの検証dbバックアップ復元アプリ用tls接続)。後段は過去時点の記録を含む。
@@ -81,7 +81,7 @@ A/B/Cは各群ごとの承認。群内の低リスク確認を逐一承認で止
 - 現在許可された作業：具体案の提示後に「お願いします」の承認を受け、CI/CD・起動定義・公開migration・切替/復旧をローカル実装/検証した。現状と使い方は[ローカル検証記録](LOCAL_DOCKER_CHECK.md)、本番への順序は[AWS手順書](AWS_DEPLOY_RUNBOOK.md)。
 - 今回実施しない作業：AWS設定変更、EC2停止・サイズ変更、GitHub設定変更、commit/push、本番切替・停止・再開。これらは引き続き個別の実行承認が必要。2026年11月16日12:27〜12:32 JSTに、承認済みのSSH/AWS/GitHub読み取り調査だけを実施した。
 - 優先する仕様：確定済みの要件定義と最新のユーザー指定。アーカイブ・復元は現在所属するチーム管理者または案件の主担当のみ。副担当だけでは許可しない。
-- 最新のIP確認：2026年11月16日、ユーザーがAWSコンソールで `13.237.188.172` がElastic IPで、`i-<INSTANCE_ID>` への関連付けを確認したと申告。解放/関連付け解除せず維持する。次の旧CD休止の具体案は[AWS手順書12節](AWS_DEPLOY_RUNBOOK.md#12-elastic-ipの確認と旧cd休止の実行案)。EC2停止・サイズ変更等は未承認のまま。
+- 最新のIP確認：2026年11月16日、ユーザーがAWSコンソールで `REQUIRES_APPROVED_PUBLIC_IP` がElastic IPで、`i-<INSTANCE_ID>` への関連付けを確認したと申告。解放/関連付け解除せず維持する。次の旧CD休止の具体案は[AWS手順書12節](AWS_DEPLOY_RUNBOOK.md#12-elastic-ipの確認と旧cd休止の実行案)。EC2停止・サイズ変更等は未承認のまま。
 - 最新の実施結果：旧CDタイマーだけの休止を個別承認後、2026年11月16日19:00 JSTにstop/disableを実施した。inactive/disabled、service停止中/ロックなし、同じ旧版コンテナ・Nginx設定、HTTPS200/TLS検証成功を確認。[手順書13節](AWS_DEPLOY_RUNBOOK.md#13-旧自動配信タイマーの休止結果)。EC2本体やAWSリソース設定、GitHub設定/push、本番切替は変更/実行していない。冒頭の実施しない作業とは別に承認された限定操作である。
 - 最新のEBS確認：ユーザーがgp3/20GiB/暗号化なし/終了時削除「はい」をコンソール確認。公開gp3単価を参照して13節の見積もりを更新し、[手順書14節](AWS_DEPLOY_RUNBOOK.md#14-ebs確認後の容量対策とサイズ変更案)へ停止/2GB化/起動の実行案を具体化した。これらの操作は未承認・未実施。
 - 最新の停止前条件：ユーザーが旧snapshot `snap-<SNAPSHOT_ID>`（10月11日13:48 JST、8GiB、完了、非暗号化、同じ元EBS）を確認。削除しない。現在20GiBの最新snapshotを承認後に1件取得/完了確認し、結果を報告してから停止・タイプ変更・起動を1操作ずつ承認する。[手順書15節](AWS_DEPLOY_RUNBOOK.md#15-既存スナップショットの保管と最新バックアップ作成案)。稼働中ルートの整合性と復元テスト未実施を区別する。新規snapshotはまだ未作成。
@@ -278,7 +278,7 @@ EC2停止はインスタンス削除ではない。ボリューム削除、イ�
 
 ### Elastic IP
 
-2026年11月16日、ユーザーがAWSコンソールで現在の公開IP `13.237.188.172` がElastic IPで、対象EC2 `i-<INSTANCE_ID>` に関連付けられていることを確認したと申告。これを確認済みの計画前提とする。EC2ロールからの参照は引き続き拒否され、エージェントが独立にAPIで確認した結果ではない。
+2026年11月16日、ユーザーがAWSコンソールで現在の公開IP `REQUIRES_APPROVED_PUBLIC_IP` がElastic IPで、対象EC2 `i-<INSTANCE_ID>` に関連付けられていることを確認したと申告。これを確認済みの計画前提とする。EC2ロールからの参照は引き続き拒否され、エージェントが独立にAPIで確認した結果ではない。
 
 Elastic IPを解放/関連付け解除せず維持する。実際の停止・サイズ変更前にも対象と関連付けの維持を確認する。確認目的だけでIAM権限を追加しない。
 

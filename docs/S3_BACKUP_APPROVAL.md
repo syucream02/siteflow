@@ -1,3 +1,5 @@
+> 公開用テンプレートの値はすべて未設定の識別子です。バックアップ設定JSONはレビュー用の複数API入力例を含み、実環境の承認・対象照合・個別API検証なしに適用しないでください。
+
 > 最新状態（2026-11-19 04:52 JST）：S3保存・本人復号・別DBのTLS復元・16テーブル整合性・復元DBのログイン/案件作成/保存/再取得/ログアウトまで成功。今回追加DB/再取込なし。正式DB/既存サービス不変。日次自動化・別EC2復旧・公開切替の合格ではない。詳細はPREDEPLOY_VALIDATION.mdの最終結果。
 
 > 最新追記（2026-11-19）：検証用HTTPを修正し、正Host200/不正Host503を確認。無効なperformance_schemaを使った接続確認で停止。取得可能なinformation_schema.PROCESSLISTへの確認SQL変更案を提示中。業務操作/総合復元検証は未完了。
@@ -18,16 +20,16 @@
 
 ## 対象と費用
 
-- シドニーの専用bucket **siteflow-db-backups-173291123374-ap-southeast-2** を1個。名前の一意性は作成時に確認し、取得済みなら別名で無断作成しない。
+- シドニーの専用bucket **REQUIRES_APPROVED_BACKUP_BUCKET_NAME** を1個。名前の一意性は作成時に確認し、取得済みなら別名で無断作成しない。
 - 既存EC2ロール **SiteFlow-EC2-SSM-Role** に対象bucket限定のinline policy **SiteFlowS3Backup** を追加する。新IAMユーザー/アクセスキー/別EC2/RDS/NAT/KMS keyは作らない。
 - 11月17日20:36 JST取得のAWS公式料金（publicationDate 2026-11-16T21:17:45Z）：S3 Standard 0.025 USD/GB月、PUT/LIST等1000回0.0055 USD、GET等1000回0.00044 USD。保存40個相当×100〜256MiBの例なら月約0.11〜0.26 USD＋通信/増加/税。現在の正式DB SQLは約28KBで、将来サイズの保証ではない。
 - S3停止料金という区分はなく、EC2休止中も保存量と要求に応じて課金。保護版の増加は月次確認する。SSE-S3自体の暗号化追加料金はない。
 
 ## 設定と権限
 
-`deploy/backup/bucket-settings.json`：Block Public Access全ON、ACL無効/BucketOwnerEnforced、SSE-S3 AES256、Versioning有効。`bucket-policy.json`：HTTP拒否、PUT時AES256明示を必須、backup roleによるprotected/config削除と全旧version削除を拒否。
+`deploy/backup/bucket-settings.example.json`：Block Public Access全ON、ACL無効/BucketOwnerEnforced、SSE-S3 AES256、Versioning有効。`bucket-policy.example.json`：HTTP拒否、PUT時AES256明示を必須、backup roleによるprotected/config削除と全旧version削除を拒否。
 
-`role-policy.json`：daily/protected/configへのList/Put/Getだけ、日次整理のDeleteObjectはdailyだけ。bucket管理/他bucket/旧version物理削除は許可しない。`restore-policy.json`は復元時の運用者セッション用の最小権限例で、EC2日常ロールへ追加しない。
+`role-policy.example.json`：daily/protected/configへのList/Put/Getだけ、日次整理のDeleteObjectはdailyだけ。bucket管理/他bucket/旧version物理削除は許可しない。`restore-policy.example.json`は復元時の運用者セッション用の最小権限例で、EC2日常ロールへ追加しない。
 
 EC2から既存ロールの付与policy/inline policy一覧を読もうとしたが両方AccessDenied。**最小権限の総合確認は未完了**。承認後の適用前に、本人のAWSコンソールでIAM→ロール→SiteFlow-EC2-SSM-Roleの既存許可を確認する。既存の別機能のpolicyを削除・置換しない。広いS3許可があれば、それも含めて評価してから進める。権限不足を理由にAdministratorAccessを追加しない。
 
@@ -47,6 +49,6 @@ EC2から既存ロールの付与policy/inline policy一覧を読もうとした
 
 失敗した場合はbackup処理を止め、今回のpolicy付与を外せばアクセス追加を取り消せる。元DB/既存公開は変更しない。bucketとbackupを保持すると料金は残る。versionやbucketの削除は復旧データを失う操作なので、別途確認してから行う。設定変更だけでSQLデータは自動でS3へ退避されない。
 
-JSONはAWS APIの入力例。bucket-settings.jsonは複数APIの設定をまとめたレビュー用で、1回のAPIへそのまま渡すファイルではない。実行前に各APIの対象と結果を照合する。
+JSONはAWS APIの入力例。bucket-settings.example.jsonは複数APIの設定をまとめたレビュー用で、1回のAPIへそのまま渡すファイルではない。実行前に各APIの対象と結果を照合する。
 
 根拠：[AWS公式Sydney料金JSON](https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonS3/current/ap-southeast-2/index.json)、[SSE-S3](https://docs.aws.amazon.com/AmazonS3/latest/userguide/UsingServerSideEncryption.html)、[S3公開防止](https://docs.aws.amazon.com/AmazonS3/latest/userguide/access-control-block-public-access.html)。

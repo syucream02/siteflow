@@ -33,7 +33,7 @@
   <h1>一度に、ひとつ分かればいい。</h1>
   <p class="intro">1回5分、図やコードを1ブロックずつ。図を見る → 実コードを読む → 小さく書く。<br>開発が進んだら、このノートに追記していきます。</p>
   <div class="course-shortcuts" aria-label="実コードを読む4テーマ"><p>初心者向けの実コード教材：この順で、ひとつずつ。</p><button type="button" data-topic="react">① React</button><button type="button" data-topic="typescript">② TypeScript</button><button type="button" data-topic="next">③ Next.js</button><button type="button" data-topic="api">④ API</button></div>
-  <p class="small muted" style="margin-top:12px">現在地：CDを一時中断し、ローカル保存を整理して本体の機能開発へ戻る準備。polling方式・incident v2はローカル検証済み、現行CIのAction SHA固定も完了。1026件とAction関連202件はそれぞれ過去の検証結果です。保留AWS方式の未確定pinは別に残り、実通知・実復旧・本番CDは未導入。本番CDはNO-GO。公開環境は変更していません。</p>
+  <p class="small muted" style="margin-top:12px">現在地：未保存入力・エラー処理をローカルで改善。関連Node289件・実Chrome50項目を確認。未保存の移動確認、結果不明時の再送制限、認証失効時の破棄を追加。本番未反映。CDは一時中断・NO-GO・executionAllowed:falseを維持。</p>
   <div class="status" aria-label="アプリの現在地">
     <div><strong><span class="badge">画面</span> 2種類の画面</strong><span class="small muted">/ はメモリ・/workspace はDB接続</span></div>
     <div><strong><span class="badge">DB</span> 専用DBで検証済み</strong><span class="small muted">履歴保持・誤参照など13件成功</span></div>
@@ -60,8 +60,346 @@
 <!-- 更新する場所：headerの現在地と、このJSONのupdated・topics・journal。履歴とテーマIDを保ち、秘密情報は書かない。 -->
 <script id="learning-data" type="application/json">
 {
-  "updated": "2026-11-24",
+  "updated": "2026-11-26",
   "topics": [
+    {
+      "status": "ローカル実装・自動検証済み、本番未反映",
+      "proof": "新規単体4件・実DB/API18件・中継追加1件を含む関連269件成功。実MySQL/Next.js/Chrome通し11項目＋応答喪失1項目、PC1440/390幅、既存データ回収と指紋照合を確認。型検査・ESLint・build成功。詳細はVERIFICATION.md。",
+      "pending": "一般公開登録、招待限定登録、実メール本人確認・送信、不在進行役の復旧、本番適用、実復元、全ブラウザー・全競合・性能は未検証または対象外。準備済み架空アカウントは実メール確認フローの完成ではない。",
+      "files": [
+        "lib/siteflow/domain.ts",
+        "examples/mysql/team-membership-service.ts",
+        "examples/mysql/team-invitation-service.ts",
+        "components/siteflow/team-settings.tsx",
+        "docs/MEMBERSHIP_AND_HISTORY.md"
+      ],
+      "id": "team-access-roles-v1",
+      "title": "認証と認可：誰かと、何をしてよいか",
+      "diagram": "team-access-roles-v1",
+      "one": "ログインできることと、チームを管理できることを分ける。",
+      "points": [
+        "Better AuthはCookieから本人を確認。チームAPIは現在のTeamMembershipで所属とadmin/memberを確認する。",
+        "一般メンバーの自己昇格と他チーム操作をサーバーで拒否する。画面のボタン非表示だけに頼らない。",
+        "管理者でも会議進行役の代わりにはならない。所属を失っても別チームとログインセッションは維持する。"
+      ],
+      "why": "本人が分かっても、そのチームの管理者とは限らないため。URL・ブラウザーのrole・TeamParticipantは権限の証明にしない。",
+      "question": "管理者ボタンをHTMLから作り直したら操作できる？",
+      "answer": "できない。APIがDBの現在の所属と役割を確認し、一般メンバーには403を返す。",
+      "pitch": "認証は本人確認、認可は操作許可です。チーム単位の現在の所属を毎回調べ、自己申告の権限を信用しません。",
+      "exercise": "domain.tsのcanReadTeamとteam-membership-service.tsのchangeTeamMembershipを読む。管理者と進行役の条件の違いを説明してみる。",
+      "code": {
+        "file": "examples/mysql/team-membership-service.ts（要点）",
+        "text": "const own = memberships.find(m => m.userId === userId);\nif (!team || !own) return teamFailure(403, 'TEAM_ACCESS_DENIED');\nif (input.action !== 'leave' && own.role !== 'admin')\n  return teamFailure(403, 'TEAM_MANAGE_DENIED');"
+      }
+    },
+    {
+      "id": "workspace-dirty-v1",
+      "title": "入力は下書き、MySQLは保存済みの記録",
+      "one": "Reactの入力と取得データを分け、編集開始時との違いでdirtyを判定する。",
+      "points": [
+        "元の値へ戻せば未保存警告を解除。副担当は並び順ではなく集合で比較する。",
+        "複数フォームの未保存・保存中を共通Hookが所有者別に管理する。一つの保存終了だけでは他の処理を解除しない。",
+        "移動は破棄/残るを確認。保存成功で解除。検索条件は業務下書きに含めない。"
+      ],
+      "why": "入力イベントの回数では、変更が残っているか分からないため。保存済みデータと下書きを同じstateで上書きしない。",
+      "question": "担当者をA・BからB・Aへ並べ替えただけならdirty？",
+      "answer": "順序が業務上無意味なら同じ選択。変更とは扱わない。",
+      "pitch": "サーバーの値を編集開始の基準にし、入力との差だけを未保存と扱います。通信取得で下書きは上書きしません。",
+      "exercise": "案件名を変更し、元の値へ戻して移動する。警告が必要な場合と不要な場合の違いを自分の言葉で説明する。",
+      "code": {
+        "file": "components/siteflow/draft-guard.ts",
+        "text": "useDraftGuard(dirty, busy, discard);\n// Hookはフォームごとの保護を登録し、アンマウントで解除する。"
+      },
+      "diagram": "workspace-dirty-v1",
+      "status": "ローカル実装・自動検証済み、本番未反映",
+      "proof": "新規25件を含む関連Node試験289件成功（既存264件は今回の回帰結果、新規API25件は最終変更後に再実行）。新規Chrome12項目と既存38項目、合計50項目成功。専用DB17表の既存データ比較と回収を実施。詳細はVERIFICATION.md。",
+      "pending": "本番未反映。全ブラウザー・OS強制終了・全キーボード・読み上げ・全競合は未検証。冪等性キーと自動保存・ブラウザー下書き保存は対象外。端末故障や強制終了で入力が失われる可能性は残る。",
+      "files": [
+        "components/siteflow/draft-guard.ts",
+        "components/siteflow/workspace-api.ts",
+        "components/siteflow/workspace-location.ts",
+        "tests/workspace-reliability.test.mjs",
+        "examples/mysql/check-workspace-reliability.mjs"
+      ]
+    },
+    {
+      "id": "workspace-http-v1",
+      "title": "HTTPエラーと「保存結果不明」を分ける",
+      "one": "保存できなかったことと、保存できたか確認できないことは別。",
+      "points": [
+        "400は入力、401は再ログイン、403は権限、404は対象、409は競合、429は待機、500系は状態確認。",
+        "タイムアウトは15秒。既存の中継8秒より余裕を取り、API内蔵モードも待ち続けない。実測した性能保証ではない。",
+        "JSON解析失敗でもHTTPステータスを残す。SQL・スタック・外部のエラー全文を画面へ流さない。"
+      ],
+      "why": "DB保存後に応答だけ失うと、失敗と思って再送した操作が二重登録になるため。",
+      "question": "通信をAbortControllerで中断したらMySQLもロールバックされる？",
+      "answer": "されない。ブラウザーの待機中止とサーバー側トランザクションは別。保存後に応答だけ失うこともある。",
+      "pitch": "通信断や15秒経過を保存失敗と決めつけず、書き込みは結果不明として止めます。再取得は明示操作で行います。",
+      "exercise": "実DB保存後に応答を遮断する試験の、DB件数1件と再送ボタン無効を確認する。",
+      "code": {
+        "file": "components/siteflow/workspace-api.ts",
+        "text": "if (resultUnknown(error)) setUncertain(true);\n// POST/PATCH/PUT/DELETEは自動再送しない。"
+      },
+      "diagram": "workspace-http-v1",
+      "status": "ローカル実装・自動検証済み、本番未反映",
+      "proof": "新規25件を含む関連Node試験289件成功（既存264件は今回の回帰結果、新規API25件は最終変更後に再実行）。新規Chrome12項目と既存38項目、合計50項目成功。専用DB17表の既存データ比較と回収を実施。詳細はVERIFICATION.md。",
+      "pending": "本番未反映。全ブラウザー・OS強制終了・全キーボード・読み上げ・全競合は未検証。冪等性キーと自動保存・ブラウザー下書き保存は対象外。端末故障や強制終了で入力が失われる可能性は残る。",
+      "files": [
+        "components/siteflow/draft-guard.ts",
+        "components/siteflow/workspace-api.ts",
+        "components/siteflow/workspace-location.ts",
+        "tests/workspace-reliability.test.mjs",
+        "examples/mysql/check-workspace-reliability.mjs"
+      ]
+    },
+    {
+      "id": "workspace-async-v1",
+      "title": "古い通信と二重送信を止める",
+      "one": "遅い応答が今のチームや入力を上書きしないよう、通信と表示の世代を確認する。",
+      "points": [
+        "AbortControllerは不要になった読み取りを中止する。案件検索の既存の世代番号も維持する。",
+        "refの同期ガードは同一画面の連打対策。冪等性は何度実行しても同じ効果という別の性質で、全APIでは保証していない。",
+        "409は入力保持、最新版を別表示、明示比較後に版を更新。新規作成は一覧再取得だけで自動再送可能にしない。"
+      ],
+      "why": "通信開始と完了の順序は一致しないため。取得・入力・保存対象の版を別々に扱う。",
+      "question": "最新版のGETに成功すれば、直前のPOSTが失敗したと断定できる？",
+      "answer": "できない。後から保存が完了する可能性や別の同名データがあり、曖昧なら結果不明のままにする。",
+      "pitch": "古い通信を捨てる仕組みと、送信を一回にする仕組みを分けました。成功応答後のGET失敗も保存失敗に戻しません。",
+      "exercise": "競合試験で、最新版取得後も入力と保存対象の版が自動変更されないことを確かめる。",
+      "code": {
+        "file": "components/siteflow/workspace-api.ts",
+        "text": "const generation = sessionGeneration;\n// 応答時にも現在の世代と照合し、別アカウントの画面に返さない。"
+      },
+      "diagram": "workspace-async-v1",
+      "status": "ローカル実装・自動検証済み、本番未反映",
+      "proof": "新規25件を含む関連Node試験289件成功（既存264件は今回の回帰結果、新規API25件は最終変更後に再実行）。新規Chrome12項目と既存38項目、合計50項目成功。専用DB17表の既存データ比較と回収を実施。詳細はVERIFICATION.md。",
+      "pending": "本番未反映。全ブラウザー・OS強制終了・全キーボード・読み上げ・全競合は未検証。冪等性キーと自動保存・ブラウザー下書き保存は対象外。端末故障や強制終了で入力が失われる可能性は残る。",
+      "files": [
+        "components/siteflow/draft-guard.ts",
+        "components/siteflow/workspace-api.ts",
+        "components/siteflow/workspace-location.ts",
+        "tests/workspace-reliability.test.mjs",
+        "examples/mysql/check-workspace-reliability.mjs"
+      ]
+    },
+    {
+      "id": "workspace-leaving-v1",
+      "title": "離脱警告と認証失効時の情報保護",
+      "one": "通常移動は確認し、認証・所属失効は確認より情報保護を優先する。",
+      "points": [
+        "beforeunloadは未保存・保存中だけ登録する。再読み込み・タブ終了の警告文や表示条件はブラウザーが決める。",
+        "アプリ内の戻る/進むは履歴位置を記録して取消時に戻す。追跡前の履歴や別ページ移動には制約がある。",
+        "401・所属失効・ログアウト後は画面と下書きを破棄する。localStorage/sessionStorageへ業務下書きを保存しない。"
+      ],
+      "why": "失効した情報を保持して再ログインした別人へ渡さないため。ログアウト応答喪失ではセッションを再確認し、確認不能なら業務画面を隠して不明と案内する。",
+      "question": "スマートフォンでアプリを強制終了してもbeforeunloadで必ず守れる？",
+      "answer": "守れない。ユーザー操作の有無・OS・ブラウザーによって警告が出ない。今回の設計は下書きの永続保存や完全復元を提供しない。",
+      "pitch": "入力保護は通常操作の誤操作対策です。セッションや所属が失われたときは、下書きを残すより情報を消すことを優先します。",
+      "exercise": "移動確認のキャンセルで入力とフォーカスが残ること、401後はログイン画面になり下書きが消えることを確認する。",
+      "code": {
+        "file": "components/siteflow/draft-guard.ts",
+        "text": "if (needed) window.addEventListener(\"beforeunload\", warn);\nelse window.removeEventListener(\"beforeunload\", warn);"
+      },
+      "diagram": "workspace-leaving-v1",
+      "status": "ローカル実装・自動検証済み、本番未反映",
+      "proof": "新規25件を含む関連Node試験289件成功（既存264件は今回の回帰結果、新規API25件は最終変更後に再実行）。新規Chrome12項目と既存38項目、合計50項目成功。専用DB17表の既存データ比較と回収を実施。詳細はVERIFICATION.md。",
+      "pending": "本番未反映。全ブラウザー・OS強制終了・全キーボード・読み上げ・全競合は未検証。冪等性キーと自動保存・ブラウザー下書き保存は対象外。端末故障や強制終了で入力が失われる可能性は残る。",
+      "files": [
+        "components/siteflow/draft-guard.ts",
+        "components/siteflow/workspace-api.ts",
+        "components/siteflow/workspace-location.ts",
+        "tests/workspace-reliability.test.mjs",
+        "examples/mysql/check-workspace-reliability.mjs"
+      ]
+    },
+    {
+      "status": "ローカル実装・自動検証済み、本番未反映",
+      "proof": "新規単体4件・実DB/API18件・中継追加1件を含む関連269件成功。実MySQL/Next.js/Chrome通し11項目＋応答喪失1項目、PC1440/390幅、既存データ回収と指紋照合を確認。型検査・ESLint・build成功。詳細はVERIFICATION.md。",
+      "pending": "一般公開登録、招待限定登録、実メール本人確認・送信、不在進行役の復旧、本番適用、実復元、全ブラウザー・全競合・性能は未検証または対象外。準備済み架空アカウントは実メール確認フローの完成ではない。",
+      "files": [
+        "lib/siteflow/domain.ts",
+        "examples/mysql/team-membership-service.ts",
+        "examples/mysql/team-invitation-service.ts",
+        "components/siteflow/team-settings.tsx",
+        "docs/MEMBERSHIP_AND_HISTORY.md"
+      ],
+      "id": "team-invitations-v1",
+      "title": "招待と所属：本人が承認して初めて参加する",
+      "diagram": "team-invitations-v1",
+      "one": "Invitationは参加待ちの記録、TeamMembershipは現在のアクセス権。",
+      "points": [
+        "宛先・期限7日・発行者・状態をInvitationに保存。登録済みかどうかを一般利用者に探索させない。",
+        "本人専用一覧はDBの現在メールと認証済み状態を使う。招待IDは秘密トークンではなく、IDだけで参加できない。",
+        "承認時は宛先・期限・pending・member役割・発行者の現在の管理者権限を再確認し、所属と使用済み化を一括保存する。"
+      ],
+      "why": "メール送信や公開登録を追加せず、既存アカウント向けの参加機能を小さく安全に完成させるため。MySQLのアクセント同一視で別アドレスを一致させないよう、宛先はバイナリ比較する。",
+      "question": "招待一覧を開いてから発行者が降格したら参加できる？",
+      "answer": "できない。降格・所属解除・退出は保留招待を取消し、承認側も現在の発行者権限を再確認する。期限・状態も保存直前に調べる。",
+      "pitch": "招待は所属そのものではありません。本人がログインして承認したときにだけ一般メンバーの所属を作り、同じ招待は再利用させません。",
+      "exercise": "team-invitation-service.tsのanswerTeamInvitationを読む。招待のプレビュー取得だけで許可せず、ロック後に読み直す理由を考える。",
+      "code": {
+        "file": "examples/mysql/team-invitation-service.ts（要点）",
+        "text": "if (!invitationCanBeAccepted(invitation, user, now)) return unavailable();\n// 同じtransaction内で招待状態確定・所属作成・Team.version加算\n// 新規登録・メール送信・秘密の招待トークン発行はしない。"
+      }
+    },
+    {
+      "status": "ローカル実装・自動検証済み、本番未反映",
+      "proof": "新規単体4件・実DB/API18件・中継追加1件を含む関連269件成功。実MySQL/Next.js/Chrome通し11項目＋応答喪失1項目、PC1440/390幅、既存データ回収と指紋照合を確認。型検査・ESLint・build成功。詳細はVERIFICATION.md。",
+      "pending": "一般公開登録、招待限定登録、実メール本人確認・送信、不在進行役の復旧、本番適用、実復元、全ブラウザー・全競合・性能は未検証または対象外。準備済み架空アカウントは実メール確認フローの完成ではない。",
+      "files": [
+        "lib/siteflow/domain.ts",
+        "examples/mysql/team-membership-service.ts",
+        "examples/mysql/team-invitation-service.ts",
+        "components/siteflow/team-settings.tsx",
+        "docs/MEMBERSHIP_AND_HISTORY.md"
+      ],
+      "id": "team-membership-history-v1",
+      "title": "所属を外しても、過去の人物と記録を残す",
+      "diagram": "team-membership-history-v1",
+      "one": "現在の所属だけを外し、TeamParticipantと会議の過去記録を消さない。",
+      "points": [
+        "未保管・未完了案件の主副担当、進行中会議の進行役、未対応事項の担当者が残れば解除を拒否する。",
+        "保管案件の未対応事項も本体から検査。終了済みsnapshotやメモの記録者を退会のために書き換えない。",
+        "再参加は新しい一般メンバー所属を作り、同じ人物記録を再利用。過去の管理者権限や完了事項を復活させない。"
+      ],
+      "why": "現在のアクセス権と履歴の参照先を同じレコードにすると、退会で履歴が壊れるため。解除チェックは画面の1ページではなく全件数を調べ、各先頭20件を導線として表示する。",
+      "question": "過去のsnapshotに退会者が残っていれば、現在も所属していると判断してよい？",
+      "answer": "判断しない。アクセス権は現在のTeamMembership、過去の人物はTeamParticipantと当時名で別々に扱う。",
+      "pitch": "所属を外すこととアカウントや履歴を消すことを分けました。進行中の仕事を引き継いでから退出し、過去の会議記録はそのまま残します。",
+      "exercise": "removalBlockersのProject・Meeting・MeetingActionItemの条件を読む。MeetingActionSnapshotを解除可否の判定に使わない理由を説明する。",
+      "code": {
+        "file": "examples/mysql/team-membership-service.ts（要点）",
+        "text": "const blockers = await removalBlockers(tx, teamId, subjectId, lastAdmin);\nif (!blockers.allowed) return teamFailure(409, 'MEMBERSHIP_BLOCKED');\nawait tx.teamMembership.delete({ where: { teamId_userId: { teamId, userId: subjectId } } });\n// TeamParticipant、案件、メモ、snapshot、履歴は変更しない。"
+      }
+    },
+    {
+      "status": "ローカル実装・自動検証済み、本番未反映",
+      "proof": "新規単体4件・実DB/API18件・中継追加1件を含む関連269件成功。実MySQL/Next.js/Chrome通し11項目＋応答喪失1項目、PC1440/390幅、既存データ回収と指紋照合を確認。型検査・ESLint・build成功。詳細はVERIFICATION.md。",
+      "pending": "一般公開登録、招待限定登録、実メール本人確認・送信、不在進行役の復旧、本番適用、実復元、全ブラウザー・全競合・性能は未検証または対象外。準備済み架空アカウントは実メール確認フローの完成ではない。",
+      "files": [
+        "lib/siteflow/domain.ts",
+        "examples/mysql/team-membership-service.ts",
+        "examples/mysql/team-invitation-service.ts",
+        "components/siteflow/team-settings.tsx",
+        "docs/MEMBERSHIP_AND_HISTORY.md"
+      ],
+      "id": "team-management-locks-v1",
+      "title": "版番号と行ロックで、最後の管理者を守る",
+      "diagram": "team-management-locks-v1",
+      "one": "古い画面の更新は版番号で拒否し、同時操作は行ロックで順序を作る。",
+      "points": [
+        "Team.versionとexpectedVersionが違えば409。下書きは保持し、最新情報との明示比較まで自動再送しない。",
+        "現在の所属行をuserId順にロックし、その後Team・招待をロックする。既存業務の所属行ロックと順序をそろえる。",
+        "管理者全員をDBで数え、最後の降格・退出を拒否する。所属・招待・版の更新は1つのtransactionで全成功か全取消にする。"
+      ],
+      "why": "画面を見てから保存する間に別の人が変更するため。版番号だけで最後の管理者の同時退出は守れず、ロックとトランザクションも必要になる。Teamを先にロックする逆順の経路を増やさない。",
+      "question": "2人の管理者が同じ版から同時に退出したら？",
+      "answer": "所属行ロックで順に処理し、先の退出で版が変わるため後の要求は409になる。最新の版で再試行しても、最後の管理者なので退出を拒否する。",
+      "pitch": "版番号は古い入力を検出するもの、行ロックは同時処理の順序を作るものです。役割が違うので両方使い、保存途中の例外は全部取り消します。",
+      "exercise": "team-management-db.test.mjsの同時退出、担当追加と解除、保存失敗の3試験を読み、どの不整合を防いでいるか考える。自己チェックは自分で付ける。",
+      "code": {
+        "file": "examples/mysql/team-membership-service.ts（要点）",
+        "text": "SELECT userId, role FROM TeamMembership\nWHERE teamId = ? ORDER BY userId FOR UPDATE;\n// 次にTeam行をロック → 版・現在の役割・全業務の担当を再検査\n// ReadCommittedのtransaction。例外なら所属と招待も全取消。"
+      }
+    },
+    {
+      "id": "meeting-decisions-handover",
+      "title": "会議の相談・決定・対応事項を次回へつなぐ",
+      "status": "ローカル実装・検証、本番未反映",
+      "diagram": "meeting-decisions-handover",
+      "one": "対応事項の現在値と、会議で確認した当時の記録を分けて保存する。",
+      "points": [
+        "MeetingProjectNoteは案件ごとの相談と決定。MeetingActionItemは対応事項の本体。MeetingActionSnapshotは会議時点の内容・担当者名・状態を保持する。",
+        "自動コピーせず、終了済み会議の記録から現在も未対応の候補を選ぶ。採用時に再検証し、対応済み・取消済みを復活させない。",
+        "会議と本体の版番号を照合し、競合では409を返す。未保存入力は保持し、比較するまで自動再送しない。"
+      ],
+      "why": "1つの対応事項を次回会議でも追いながら、終了した会議の内容を後から変えないため。担当者の現在の所属はTeamMembership、過去の人物はTeamParticipantと名前のスナップショットで区別する。担当者本人への権限特例は設けず、既存の進行役ルールを使う。",
+      "proof": "入力4件・実MySQL/HTTP12件が成功。既存の業務・検索・中継107件、認証/案件102件・会議15件・検索DB6件も成功。実MySQL/Next.js/Chromeの通し11項目で409入力保持・選択的引き継ぎ・履歴保持・PC/スマホを確認。最終検証結果はVERIFICATION.mdを参照。",
+      "pending": "専用ローカル検証DBだけに追加migrationを適用。手動確認用DBも同一と照合。本番・別の開発DBへの適用、追加3テーブルの実復元、全ブラウザー・読み上げ・大量会議の性能は未検証。独立タスク画面・通知・添付・自動優先順位は対象外。CDは保留のまま。",
+      "question": "対応事項本体を書き換えたとき、終了済み会議のスナップショットも更新してよい？",
+      "answer": "更新しない。会議終了後の読み取りは保存済みスナップショットを返す。進行中の別会議は本体版の変化を検出し、最新内容を明示的に確認してから終了する。同じ対応事項の本体IDを引き継ぐので、タスクを複製して二重管理しない。",
+      "pitch": "会議の相談・決定・対応事項を追加し、未対応事項だけを選んで引き継げるようにしました。現在値と会議履歴を別テーブルにし、版番号とトランザクションで同時更新や部分保存を防いでいます。",
+      "exercise": "domain.tsのparseMeetingRecordActionとmeeting-record-service.tsのsaveMeetingRecordを読む。本体の保存後にsnapshot保存を失敗させると何が残るか考える。答えは何も確定しない。meeting-records-db.test.mjsのロールバック試験と照らし合わせる。理解チェックは自分で付ける。",
+      "code": {
+        "file": "examples/mysql/meeting-record-service.ts（処理の要点）",
+        "text": "return prisma.$transaction(async tx => {\n  // 所属 → 会議 → 対応事項の行をロック\n  // 会議版と本体版が一致するか検査\n  // 本体・この会議のsnapshot・会議versionを一緒に更新\n}, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });\n// 例外時は全取消。過去の会議のsnapshotは更新しない。"
+      },
+      "files": [
+        "db/design/integrated.prisma",
+        "db/design/migrations/20261124_meeting_records/migration.sql",
+        "lib/siteflow/domain.ts",
+        "examples/mysql/meeting-record-service.ts",
+        "examples/mysql/meeting-service.ts",
+        "components/siteflow/meeting-records.tsx",
+        "tests/meeting-records-db.test.mjs",
+        "docs/MEETING_FLOW.md"
+      ]
+    },
+    {
+      "id": "local-mysql-rsa",
+      "title": "ローカルMySQL：RSA公開鍵を固定して認証する",
+      "status": "実DB検証完了・本番未変更",
+      "diagram": "local-mysql-rsa",
+      "one": "知らない公開鍵を接続時にもらうのではなく、信頼済みDockerから確認した公開鍵と指紋を使う。",
+      "points": [
+        "MySQLのcaching_sha2_passwordとドライバーを維持。秘密鍵は取得せず、公開鍵だけを標準PEMにする。",
+        "Git除外の公開鍵と指紋を照合し、RSA 2048bit以上を確認。未設定・不一致なら接続前に拒否する。",
+        "専用DBで検索6件・認証/案件102件・会議15件が成功。業務データと認証行IDを試験前後で照合。"
+      ],
+      "why": "Docker再開でTCP接続は回復したが、完全認証でドライバーがRSA公開鍵を使えず45028となった。導入済みmariadb 3.5.4の型定義と実装が対応するcachingRsaPublicKeyを使用し、allowPublicKeyRetrieval:falseを維持する。ユーザー・パスワード・権限・認証方式を変えない。",
+      "proof": "RSA検証9件＋実DB123件＝132件成功、失敗/スキップ0件。本体/API型検査・関連ESLint・Next.js build成功。MySQL8.4.13、案件名/番号utf8mb4_unicode_ciで%・_・バックスラッシュ、大小・アクセントを実検索した。",
+      "pending": "本番未反映。RSAは認証時のパスワード保護でSQL通信全体のTLS化ではない。PC内専用DBに限定し、本番TLSは変更しない。別PC/鍵変更は信頼できる経路で確認して別途登録する。実DBと検索UIのChrome通し15項目は成功。大量データ性能・本番環境は未検証。",
+      "question": "なぜ公開鍵の自動取得を有効にするだけで済ませなかった？",
+      "answer": "接続相手から渡された鍵を無条件に信用せず、確認済みのローカルDocker経由で取得した鍵を使うため。公開鍵はパスワードを暗号化する鍵、秘密鍵はサーバーだけが持つ復号用の鍵。SPKI DERのSHA-256は鍵の指紋で、保存済み指紋と違えば止める。指紋は取得元の信頼確認の代わりにはならない。",
+      "pitch": "ローカルDB再起動後の認証問題を、認証方式を弱めずRSA公開鍵の固定で解消しました。秘密鍵やパスワードを出力せず、専用DBで検索・権限・既存機能を検証し、既存データを保持したことも確認しました。",
+      "exercise": "schema-check-settings.mjsのreadSchemaCheckConnectionOptionsを読む。小さな問い：認証キャッシュがある場合でも指紋不一致を拒否できる？ 解答：ドライバーへ渡す前に指紋を検証するので、キャッシュに関係なく拒否する。実ファイルや指紋を練習のために書き換えず、local-mysql-rsa.test.mjsの異常系を読む。",
+      "code": {
+        "file": "examples/mysql/schema-check-settings.mjs（処理の要点）",
+        "text": "cachingRsaPublicKey: validatePinnedMysqlPublicKey(pem, expectedFingerprint),\nallowPublicKeyRetrieval: false\n// 本番拒否 → 専用DB検査 → 保存鍵と指紋の照合 → 127.0.0.1へ接続"
+      },
+      "files": [
+        "examples/mysql/schema-check-settings.mjs",
+        "examples/mysql/auth-check.ts",
+        "lib/siteflow/integrated-runtime.ts",
+        "tests/local-mysql-rsa.test.mjs",
+        "tests/project-search-db.test.mjs",
+        "docs/LOCAL_WORKSPACE.md",
+        "docs/VERIFICATION.md"
+      ]
+    },
+    {
+      "id": "project-search",
+      "title": "案件検索：URLの条件をMySQLへ届ける",
+      "status": "実DB・実ブラウザー通し検証済み",
+      "diagram": "project-search",
+      "one": "取得済み20件だけを画面で絞らず、チームの全案件からサーバー側で検索する。",
+      "points": [
+        "キーワードは案件名または番号（OR）。主担当・副担当・状態・進捗はすべて満たす（AND）。",
+        "URLは適用済み条件、Reactのstateは入力途中の条件。検索変更で一覧とカーソルをリセットする。",
+        "一覧・総件数・カーソルは同じ認可・条件を使う。実MySQLの特殊文字検索は接続不能のため未検証。"
+      ],
+      "why": "既存一覧は20件ずつ取得するため、Reactのfilterだけでは次のページの案件を見落とす。Next.jsの既存APIからPrismaへ条件を渡し、MySQLで検索する。DB定義・追加依存・CD設定は変えない。",
+      "proof": "前段の型検査・関連ESLint・build、関連124件、実DB123件、RSA単体9件に加え、今回の実Chrome通し15項目が成功。応答差し替えなしで実API68応答、1440/390画像を保存。一時データ回収後の既存業務10テーブルと認証3テーブルID/件数の指紋が一致。",
+      "pending": "本番未反映。大量データ性能・全ブラウザー・読み上げ・本番環境での動作は未検証。過去の模擬Chrome14項目と、今回の実MySQL/実API通し15項目を区別する。本人の起動方法はLOCAL_WORKSPACE.md冒頭。",
+      "question": "なぜ検索条件をOR一つへ全部並べるといけない？",
+      "answer": "案件名または案件番号に一致する、の部分だけがOR。別チームを含めず、指定主担当・副担当・状態・進捗をすべて満たす必要があるので、チーム所属などのscopeと一緒にANDで結ぶ。カーソルのORも別のAND要素にしてキーワード条件を上書きしない。",
+      "pitch": "案件検索をサーバー側に追加し、URLで条件を再現できるようにしました。認可条件を一覧・件数・カーソルで共通化し、取得済みページだけを検索する見落としを防ぎます。画面はAbortControllerと取得世代、条件ごとのコンポーネント分離で古い応答を排除します。",
+      "exercise": "project-search.tsのconditionsとscopeを読む。練習：進捗0〜40％かつ状態REVIEWを検索すると、100％のDONEは含まれる？ 解答：両条件を満たさないので含まれない。ブラウザーのURLに秘密情報を入れない理由も説明しよう。",
+      "code": {
+        "file": "examples/mysql/project-search.ts（説明用の抜粋）",
+        "text": "const conditions = [scope];\nconditions.push({ OR: [{ name: { contains } }, { code: { contains } }] });\nconst where = { AND: conditions };\n// 同じwhereでcount・カーソル・findManyを実行する。"
+      },
+      "files": [
+        "components/siteflow/project-list.tsx",
+        "components/siteflow/workspace-location.ts",
+        "examples/mysql/project-search.ts",
+        "examples/mysql/web-api-handler.ts",
+        "lib/siteflow/domain.ts",
+        "tests/project-search.test.mjs",
+        "tests/project-search-api.test.mjs",
+        "tests/project-search-db.test.mjs"
+      ]
+    },
     {
       "id": "poll-incident-m5",
       "title": "CDの障害を記録し、人が安全に復旧を判断する",
@@ -80,35 +418,45 @@
       "answer": "IDの計算対象に日時は含まれないためIDは同じですが、日時を含むintegritySha256は一致しなくなり拒否します。ハッシュを付け直して採用したり、v1を勝手にv2へ変えたりしません。通知成功もincident解除にはなりません。",
       "pitch": "同じ事故の通知をまとめるIDと、日時を含めた記録の破損検出を分離しました。新stableが故障した場合も、正常な旧rollbackのID・digest・設定などを照合して復旧計画だけを作ります。Windowsの模擬検証とレビューはPASSですが、実通知・実復旧・本番CDは未導入です。",
       "exercise": "identityとintegrityで除外する項目を比較しましょう。小さな練習：日時の改変を検出しても、なぜ悪意ある改ざんの防止とは言えないか1文で説明する。詳しい復旧手順はdocs/APPROVED_CD_SETUP.mdのincident v2節を読み、STOP中の起動禁止と別承認の位置を確認する。",
-      "code": { "file": "deploy/poll/incident.mjs / createIncidentRecord", "text": "record.incidentId = hash(identity(record));\nrecord.integritySha256 = integrity(record);" },
-      "files": ["deploy/poll/incident.mjs", "deploy/poll/persistent-state.mjs", "deploy/poll/integration.mjs", "deploy/poll/recovery.mjs", "tests/poll-incident.test.mjs", "docs/APPROVED_CD_SETUP.md"]
+      "code": {
+        "file": "deploy/poll/incident.mjs / createIncidentRecord",
+        "text": "record.incidentId = hash(identity(record));\nrecord.integritySha256 = integrity(record);"
+      },
+      "files": [
+        "deploy/poll/incident.mjs",
+        "deploy/poll/persistent-state.mjs",
+        "deploy/poll/integration.mjs",
+        "deploy/poll/recovery.mjs",
+        "tests/poll-incident.test.mjs",
+        "docs/APPROVED_CD_SETUP.md"
+      ]
     },
     {
-  "id": "overview",
-  "title": "まず、全体像",
-  "status": "現在地",
-  "diagram": "next-api-integration",
-  "one": "Next.js＋MySQL版を既存AWSで初回公開。公開HTTPSでログイン・案件保存・再取得・ログアウトを確認。新CD/OIDCは保留。",
-  "points": [
-    "公開の入口はNginx→Next.js3001。旧Vinext3002を復旧用に維持。",
-    "テスト案件だけ作成・進捗37%保存・再取得。既存案件は変えない。",
-    "秘密の権限600を維持して検証。未完成機能と未検証事項は残す。"
-  ],
-  "why": "できた部分と、これからつなぐ部分を分けて説明するため。",
-  "proof": "2026-11-21 11:58 JSTに公開HTTP試験成功。readiness3回、Cookie、ログイン/保存/再取得/ログアウト、旧セッション401、MySQL healthy、外部WindowsのHTTPSを確認。過去の会議・復元試験記録は各履歴に保持。",
-  "pending": "差分表示は2026-11-22にローカル実装・検証済み、本番未反映。相談事項・決定事項・作業項目・招待/実メール認証は未完成。公開後実ブラウザーUI・EC2再起動・長期ログ運用は未検証。新CD/OIDCは今回の公開条件から外して保留。",
-  "question": "/ の画面で指摘を登録したら、MySQLにも保存される？",
-  "answer": "/ の指摘管理はメモリデモなのでDBには保存しない。/workspace の新規案件登録は専用MySQLへ保存する。画面による違いを区別する。",
-  "pitch": "Next.jsにAPIを統合し、業務処理とDB処理は分離したまま再利用しました。別APIなしでログイン・保存・競合を確認し、保管権限は通常編集より狭くしています。",
-  "exercise": "/ と /workspace を開き、メモリデモとDB接続版の違いを1文ずつ話す。",
-  "code": null,
-  "files": [
-    "app/page.tsx",
-    "app/workspace/page.tsx",
-    "components/siteflow/connected-workspace.tsx",
-    "docs/LOCAL_WORKSPACE.md"
-  ]
-},
+      "id": "overview",
+      "title": "まず、全体像",
+      "status": "現在地",
+      "diagram": "next-api-integration",
+      "one": "Next.js＋MySQL版を既存AWSで初回公開。公開HTTPSでログイン・案件保存・再取得・ログアウトを確認。新CD/OIDCは保留。",
+      "points": [
+        "公開の入口はNginx→Next.js3001。旧Vinext3002を復旧用に維持。",
+        "テスト案件だけ作成・進捗37%保存・再取得。既存案件は変えない。",
+        "秘密の権限600を維持して検証。未完成機能と未検証事項は残す。"
+      ],
+      "why": "できた部分と、これからつなぐ部分を分けて説明するため。",
+      "proof": "2026-11-21 11:58 JSTに公開HTTP試験成功。readiness3回、Cookie、ログイン/保存/再取得/ログアウト、旧セッション401、MySQL healthy、外部WindowsのHTTPSを確認。過去の会議・復元試験記録は各履歴に保持。",
+      "pending": "差分表示は2026-11-22にローカル実装・検証済み、本番未反映。相談事項・決定事項・作業項目・招待/実メール認証は未完成。公開後実ブラウザーUI・EC2再起動・長期ログ運用は未検証。新CD/OIDCは今回の公開条件から外して保留。",
+      "question": "/ の画面で指摘を登録したら、MySQLにも保存される？",
+      "answer": "/ の指摘管理はメモリデモなのでDBには保存しない。/workspace の新規案件登録は専用MySQLへ保存する。画面による違いを区別する。",
+      "pitch": "Next.jsにAPIを統合し、業務処理とDB処理は分離したまま再利用しました。別APIなしでログイン・保存・競合を確認し、保管権限は通常編集より狭くしています。",
+      "exercise": "/ と /workspace を開き、メモリデモとDB接続版の違いを1文ずつ話す。",
+      "code": null,
+      "files": [
+        "app/page.tsx",
+        "app/workspace/page.tsx",
+        "components/siteflow/connected-workspace.tsx",
+        "docs/LOCAL_WORKSPACE.md"
+      ]
+    },
     {
       "id": "react",
       "title": "React：画面が変わる理由",
@@ -3239,7 +3587,7 @@
         "docs/S3_BACKUP_APPROVAL.md",
         "docs/PREDEPLOY_VALIDATION.md",
         "docs/AWS_DEPLOY_RUNBOOK.md",
-        "deploy/backup/role-policy.json"
+        "deploy/backup/role-policy.example.json"
       ]
     },
     {
@@ -3619,261 +3967,484 @@
         "tests/aws-cd-recovery.test.mjs",
         "docs/AWS_CD_STAGE1.md"
       ]
+    },
+    {
+      "id": "manual-first-public-release",
+      "title": "初回公開：いま動く版を安全に表へ出す",
+      "status": "Next.js初回公開成功",
+      "diagram": "manual-first-public-release",
+      "one": "公開の入口をNext.jsへ切り替え、ログインから案件保存・ログアウトまで確認できた。",
+      "points": [
+        "検証枠を所有者UID1000へ合わせた。秘密ファイルは600のまま、コードは標準入力から渡す。",
+        "新workerと公開ready200/ok:trueを3回確認。ログイン・Cookie・テスト案件37%保存/再取得・ログアウトに成功。",
+        "Next.js公開を維持。旧Vinextは復旧用に稼働し、既存案件とコンテナは変えていない。"
+      ],
+      "why": "秘密ファイルを他人も読めるようにせず、必要な検証処理だけを正当な所有者として実行するため。最小権限とは、必要な人・処理に必要な操作だけを許すこと。",
+      "proof": "公開HTTPS経由のHTTP試験すべて成功。CookieはSecure/HttpOnly/SameSite=Lax。新規案件を除くProjectの指紋とコンテナID/開始時刻は一致、MySQL healthy、Nginx error以上0件。Windowsからも証明書検証付きでok:true。",
+      "pending": "今回の実ブラウザークリック試験・実EC2再起動・長期監視・日次自動バックアップは未検証/未整備。初回版は11月17日の既存イメージ。差分表示・決定事項・招待等は未完成。以前の404の原因は確定扱いにしない。",
+      "question": "アカウントを読めない検証処理に対して、今回どこを直した？",
+      "answer": "秘密ファイルの600を緩めず、検証枠を所有者UID1000へ合わせた。root所有コードの読取問題を避けるため、非秘密のコードは標準入力から渡した。特権削除・swap/core/log禁止も維持し、公開変更前に通信なしで準備確認した。",
+      "pitch": "既存AWSを再利用してNext.jsとMySQLを公開しました。公開経路でログイン・保護Cookie・案件保存・再取得・ログアウトを確認し、旧版を復旧用に残しました。アカウントの権限不一致は秘密ファイルを緩めず検証側のユーザーを合わせて解消しました。",
+      "exercise": "docs/MANUAL_PUBLIC_RELEASE.mdの最新結果を読む。練習：--user 1000:1000、-i、--cap-drop ALLの役割を説明しよう。解答：所有者として実行、非秘密コードを標準入力で受け取る、余計なLinux特権を外す。ログイン成功と、未実装の新規登録・招待を区別して説明しよう。",
+      "code": {
+        "file": "docs/MANUAL_PUBLIC_RELEASE.md（実行した検証コマンドの抜粋。単独実行するコマンドではない）",
+        "text": "--user 1000:1000 --cap-drop ALL --read-only\n--memory 128m --memory-swap 128m --ulimit core=0\n--log-driver none -i --input-type=module"
+      },
+      "files": [
+        "docs/MANUAL_PUBLIC_RELEASE.md",
+        "deploy/manual-public.py",
+        "docs/AWS_DEPLOY_RUNBOOK.md",
+        "README.md"
+      ]
+    },
+    {
+      "id": "portfolio-landing-demo-v1",
+      "title": "紹介ページと、範囲を明示したデモ導線",
+      "diagram": "portfolio-landing-demo-v1",
+      "status": "ローカル実装・検証済み。現在の公開状態は未確認",
+      "one": "紹介ページ・メモリデモ・DB接続版は、入口と保存先が違う。",
+      "points": [
+        "app/page.tsxはServer Componentの紹介ページ。認証やDBを呼ばず、metadataでページ名と説明を指定する。",
+        "app/demo/page.tsxは既存Workspaceを再利用する。デモの操作状態はブラウザー内にあり、再読み込みで初期値へ戻る。業務DBや認証APIへ接続しない。",
+        "app/workspace/page.tsxは既存の認証・統合版を保つ。既存アカウントが必要で、新規登録は無効のまま。画面例は架空データのローカル検証画像。"
+      ],
+      "why": "初めての人に目的と体験範囲を伝えつつ、簡単なメモリデモを統合版と誤認させず、業務データから分離するため。",
+      "question": "デモで入力した内容はMySQLに残る？",
+      "answer": "残らない。/demoは画面内のstateだけを更新し、再読み込みで初期状態になる。/workspaceは既存アカウントでログインする別の統合版。",
+      "pitch": "トップページはサービスの目的を紹介し、デモでは一部の操作をアカウントなしで試せます。デモの入力は保存されず、統合版の案件・会議・チーム機能とは別です。スマートフォンでも読める配置と、見出し・代替テキスト・キーボードフォーカスを用意しました。",
+      "exercise": "app/page.tsx、app/demo/page.tsx、app/workspace/page.tsxを読む。練習：画像のaltが必要な理由と、/demoを再読み込みした時のデータの動きを説明する。",
+      "files": [
+        "app/page.tsx",
+        "app/page.module.css",
+        "app/demo/page.tsx",
+        "app/workspace/page.tsx",
+        "components/siteflow/workspace.tsx",
+        "docs/PUBLIC_DEMO_PLAN.md"
+      ],
+      "proof": "ローカルの型検査・対象ESLint・Next.js build・ChromeのPC/スマートフォン確認を実施。現在の公開サイトへの接続確認はしていない。詳細はdocs/VERIFICATION.md。",
+      "pending": "公開サイトの稼働状態、すべてのブラウザー/読み上げ、利用者別の編集可能デモは未確認・未実装。利用者別デモは発行制限・分離・期限・回収を設計してから別段階で扱う。",
+      "code": {
+        "file": "app/demo/page.tsx（構成の要点）",
+        "text": "export default function DemoPage() {\n  return <Workspace />;\n}"
+      }
     }
-  ,
-{
-  "id": "manual-first-public-release",
-  "title": "初回公開：いま動く版を安全に表へ出す",
-  "status": "Next.js初回公開成功",
-  "diagram": "manual-first-public-release",
-  "one": "公開の入口をNext.jsへ切り替え、ログインから案件保存・ログアウトまで確認できた。",
-  "points": [
-    "検証枠を所有者UID1000へ合わせた。秘密ファイルは600のまま、コードは標準入力から渡す。",
-    "新workerと公開ready200/ok:trueを3回確認。ログイン・Cookie・テスト案件37%保存/再取得・ログアウトに成功。",
-    "Next.js公開を維持。旧Vinextは復旧用に稼働し、既存案件とコンテナは変えていない。"
   ],
-  "why": "秘密ファイルを他人も読めるようにせず、必要な検証処理だけを正当な所有者として実行するため。最小権限とは、必要な人・処理に必要な操作だけを許すこと。",
-  "proof": "公開HTTPS経由のHTTP試験すべて成功。CookieはSecure/HttpOnly/SameSite=Lax。新規案件を除くProjectの指紋とコンテナID/開始時刻は一致、MySQL healthy、Nginx error以上0件。Windowsからも証明書検証付きでok:true。",
-  "pending": "今回の実ブラウザークリック試験・実EC2再起動・長期監視・日次自動バックアップは未検証/未整備。初回版は11月17日の既存イメージ。差分表示・決定事項・招待等は未完成。以前の404の原因は確定扱いにしない。",
-  "question": "アカウントを読めない検証処理に対して、今回どこを直した？",
-  "answer": "秘密ファイルの600を緩めず、検証枠を所有者UID1000へ合わせた。root所有コードの読取問題を避けるため、非秘密のコードは標準入力から渡した。特権削除・swap/core/log禁止も維持し、公開変更前に通信なしで準備確認した。",
-  "pitch": "既存AWSを再利用してNext.jsとMySQLを公開しました。公開経路でログイン・保護Cookie・案件保存・再取得・ログアウトを確認し、旧版を復旧用に残しました。アカウントの権限不一致は秘密ファイルを緩めず検証側のユーザーを合わせて解消しました。",
-  "exercise": "docs/MANUAL_PUBLIC_RELEASE.mdの最新結果を読む。練習：--user 1000:1000、-i、--cap-drop ALLの役割を説明しよう。解答：所有者として実行、非秘密コードを標準入力で受け取る、余計なLinux特権を外す。ログイン成功と、未実装の新規登録・招待を区別して説明しよう。",
-  "code": {
-    "file": "docs/MANUAL_PUBLIC_RELEASE.md（実行した検証コマンドの抜粋。単独実行するコマンドではない）",
-    "text": "--user 1000:1000 --cap-drop ALL --read-only\n--memory 128m --memory-swap 128m --ulimit core=0\n--log-driver none -i --input-type=module"
-  },
-  "files": [
-    "docs/MANUAL_PUBLIC_RELEASE.md",
-    "deploy/manual-public.py",
-    "docs/AWS_DEPLOY_RUNBOOK.md",
-    "README.md"
-  ]
-}
-],
   "journal": [
-{
-  "date": "2026-11-24",
-  "title": "CDを一時中断し、機能開発へ戻るための保存準備",
-  "changes": [
-    "89項目をK1〜K4の保存単位へ分類。生成キャッシュ2件を除外し、資料の実環境識別子をプレースホルダーへ整理。",
-    "現行CIのAction SHA固定完了と、保留AWS方式の未確定pinを区別。旧履歴は当時の記録として保持。",
+    {
+      "date": "2026-11-26",
+      "title": "サービス紹介トップとインメモリデモの入口を分離",
+      "changes": [
+        "トップページを紹介用Server Componentにし、画面例と実装済み機能を案内。",
+        "既存のインメモリ体験を/demoへ移し、/workspaceと認証は維持。",
+        "公開状態未確認と、利用者別デモの将来課題を既存資料へ記録。"
+      ],
+      "why": "初回訪問者にはサービスの価値を先に説明し、旧デモとDB接続版の違いを明確にするため。",
+      "proof": "型検査・対象ESLint・Next.js build・PC/スマートフォンのローカルChrome確認を実施。検証詳細はVERIFICATION.md。",
+      "limit": "外部の公開サイトは確認していない。新規登録、デモアカウント発行、個別データ分離は未実装。本人による手動確認は後日に保留。",
+      "topic": "portfolio-landing-demo-v1",
+      "files": [
+        "app/page.tsx",
+        "app/page.module.css",
+        "app/demo/page.tsx",
+        "components/siteflow/workspace.tsx",
+        "public/siteflow/",
+        "docs/PUBLIC_DEMO_PLAN.md"
+      ]
+    },
+    {
+      "date": "2026-11-25",
+      "title": "未保存入力・通信障害・認証失効時の保護を統一",
+      "changes": [
+        "案件を含むフォームの差分判定と、所有者別の移動・再読み込み保護を追加。",
+        "APIの15秒期限・HTTP/解析/通信分類と、結果不明時の再送制限を統合。",
+        "実DB保存後の応答喪失・競合・ログアウトをChromeで検証し、既存機能も回帰確認。"
+      ],
+      "why": "新機能を増やさず、入力消失や意図しない二重登録を減らしてv1.0の操作性を整えるため。",
+      "proof": "新規25件を含む関連Node試験289件成功（既存264件は今回の回帰結果、新規API25件は最終変更後に再実行）。新規Chrome12項目と既存38項目、合計50項目成功。専用DB17表の既存データ比較と回収を実施。詳細はVERIFICATION.md。",
+      "limit": "本番未反映。全ブラウザー・OS強制終了・全キーボード・読み上げ・全競合は未検証。冪等性キーと自動保存・ブラウザー下書き保存は対象外。端末故障や強制終了で入力が失われる可能性は残る。",
+      "topic": "workspace-dirty-v1",
+      "files": [
+        "components/siteflow/draft-guard.ts",
+        "components/siteflow/workspace-api.ts",
+        "components/siteflow/workspace-location.ts",
+        "tests/workspace-reliability.test.mjs",
+        "examples/mysql/check-workspace-reliability.mjs"
+      ]
+    },
+    {
+      "date": "2026-11-25",
+      "title": "チーム作成・所属管理・本人専用招待をローカル実装",
+      "changes": [
+        "既存チーム作成APIを画面へ接続し、所属0件からの入口と設定画面を追加。",
+        "Team.version・行ロック・解除前検査で役割/招待/退出を保護し、人物と過去記録を保持。",
+        "既存アカウントだけの本人専用招待と、実DB/API/Chromeによる自動検証を追加。"
+      ],
+      "why": "新規登録や外部メールを開放せず、既存の業務機能を壊さない最小構成でv1.0へ進むため。",
+      "proof": "新規単体4件・実DB/API18件・中継追加1件を含む関連269件成功。実MySQL/Next.js/Chrome通し11項目＋応答喪失1項目、PC1440/390幅、既存データ回収と指紋照合を確認。型検査・ESLint・build成功。詳細はVERIFICATION.md。",
+      "limit": "一般公開登録、招待限定登録、実メール本人確認・送信、不在進行役の復旧、本番適用、実復元、全ブラウザー・全競合・性能は未検証または対象外。準備済み架空アカウントは実メール確認フローの完成ではない。",
+      "topic": "team-access-roles-v1",
+      "files": [
+        "lib/siteflow/domain.ts",
+        "examples/mysql/team-membership-service.ts",
+        "examples/mysql/team-invitation-service.ts",
+        "components/siteflow/team-settings.tsx",
+        "docs/MEMBERSHIP_AND_HISTORY.md"
+      ]
+    },
+    {
+      "date": "2026-11-25",
+      "title": "会議の相談・決定・選択的引き継ぎを実装",
+      "changes": [
+        "3モデルの追加migrationをバックアップ済みの専用ローカルDBへ適用した。",
+        "進行役によるメモ・対応事項・選択的引き継ぎと、終了済み記録の保持を接続した。",
+        "10秒更新・409・ブラウザーの戻るでも未保存入力を保持し、PC/スマホで実データを操作した。"
+      ],
+      "why": "会議で決めた次の対応を次回へつなぎ、過去の会議内容も証拠として残すため。",
+      "proof": "入力4件・実MySQL/HTTP12件が成功。既存の業務・検索・中継107件、認証/案件102件・会議15件・検索DB6件も成功。実MySQL/Next.js/Chromeの通し11項目で409入力保持・選択的引き継ぎ・履歴保持・PC/スマホを確認。最終検証結果はVERIFICATION.mdを参照。",
+      "limit": "専用ローカル検証DBだけに追加migrationを適用。手動確認用DBも同一と照合。本番・別の開発DBへの適用、追加3テーブルの実復元、全ブラウザー・読み上げ・大量会議の性能は未検証。独立タスク画面・通知・添付・自動優先順位は対象外。CDは保留のまま。",
+      "topic": "meeting-decisions-handover",
+      "files": [
+        "db/design/integrated.prisma",
+        "db/design/migrations/20261124_meeting_records/migration.sql",
+        "lib/siteflow/domain.ts",
+        "examples/mysql/meeting-record-service.ts",
+        "examples/mysql/meeting-service.ts",
+        "components/siteflow/meeting-records.tsx",
+        "tests/meeting-records-db.test.mjs",
+        "docs/MEETING_FLOW.md"
+      ]
+    },
+    {
+      "date": "2026-11-24",
+      "title": "実MySQL・実API・Next.js・Chromeの検索通し試験",
+      "changes": [
+        "応答差し替えなしの専用ブラウザー検証を追加し、検索・URL・候補ページ分割・認証・既存案件編集・会議の15項目を実MySQLで確認。",
+        "PC1440/スマホ390の画像を保存。一時25案件・25人候補を回収し、既存データの指紋一致を確認。",
+        "既存アカウントの有効性を秘密値なしで照合し、統合モードの起動手順とURLを資料へ追記。一時Next.jsは停止しMySQLは維持。"
+      ],
+      "why": "単体・API試験だけでなく、実際の画面と認証CookieからDBまで一続きの動作を確かめるため。",
+      "proof": "実API68応答、15項目成功。検索名/番号/複合条件/25件追加/URL再読込と履歴/チーム分離/編集/会議取消監査/ログアウトを確認。業務10テーブル全行と認証3テーブルID/件数の指紋一致。新スクリプトのESLint成功。",
+      "limit": "最初の会議操作は検証側が保存後の画面更新完了を待たずタイムアウト。操作可能と確認件数反映を待つよう検証だけを修正し、再実行で成功。アプリ変更なし。既存の成功テストやbuildは再実行しない。大量データ性能・全ブラウザー・本番反映は対象外。",
+      "topic": "project-search",
+      "files": [
+        "examples/mysql/check-project-search-e2e.mjs",
+        "components/siteflow/project-list.tsx",
+        "docs/LOCAL_WORKSPACE.md",
+        "docs/VERIFICATION.md"
+      ]
+    },
+    {
+      "date": "2026-11-24",
+      "title": "RSA公開鍵固定で案件検索の実DB検証を完了",
+      "changes": [
+        "信頼済みローカルDockerからRSA公開鍵だけを取得。Git除外ファイルと専用設定の指紋へ固定し、既存認証方式・本番TLSを維持。",
+        "専用DBの実照合後、検索/特殊文字/照合順序・認証/案件・会議の実DB123件とRSA単体9件が成功。既存データ指紋一致。",
+        "関連する型検査・ESLint・buildを確認。新応答を含まない旧期待値1か所と公開鍵の返り値型だけを補正。模擬ブラウザーの再実行やCD変更はなし。"
+      ],
+      "why": "Docker再開でTCP接続は回復したが、完全認証でドライバーがRSA公開鍵を使えず45028となった。導入済みmariadb 3.5.4の型定義と実装が対応するcachingRsaPublicKeyを使用し、allowPublicKeyRetrieval:falseを維持する。ユーザー・パスワード・権限・認証方式を変えない。",
+      "proof": "RSA検証9件＋実DB123件＝132件成功、失敗/スキップ0件。本体/API型検査・関連ESLint・Next.js build成功。MySQL8.4.13、案件名/番号utf8mb4_unicode_ciで%・_・バックスラッシュ、大小・アクセントを実検索した。",
+      "limit": "本番未反映。RSAは認証時のパスワード保護で、SQL通信全体をTLS化する設定ではない。PC内検証接続だけで使い、本番TLSを変更しない。別PC/鍵変更は信頼できる経路で再確認して別途登録する。大量データ性能、実DBと検索UIの一連の実ブラウザー試験は未検証。",
+      "topic": "local-mysql-rsa",
+      "files": [
+        "examples/mysql/schema-check-settings.mjs",
+        "examples/mysql/auth-check.ts",
+        "lib/siteflow/integrated-runtime.ts",
+        "tests/local-mysql-rsa.test.mjs",
+        "tests/project-search-db.test.mjs",
+        "docs/LOCAL_WORKSPACE.md",
+        "docs/VERIFICATION.md"
+      ]
+    },
+    {
+      "date": "2026-11-24",
+      "title": "実DB検証の再開：TCP回復後、RSA認証で安全停止",
+      "changes": [
+        "PC内Docker Engine・既存MySQL 8.4.13・ボリューム・127.0.0.1:3307・Compose設定の一致を確認し、既存コンテナを再作成せず起動。",
+        "healthyと3307番へのTCP接続を確認。ただし専用Prisma接続のSELECT 1はP2010 / 45028 / HY000で失敗。既存MariaDBドライバーのRSA公開鍵未設定の経路と照合。",
+        "認証方式や公開鍵取得の安全条件を変更せず停止。専用DB名/ユーザーの実照合、検索・認証・会議のDB試験、既存データ指紋の取得は未完了。"
+      ],
+      "why": "TCP接続の成功はDB認証や安全な試験実行の成功ではない。既存コンテナを保ち、認証を弱めて試験を通さないため。",
+      "proof": "Docker構成照合7項目成功、同じコンテナIDと既存ボリュームを維持。running/healthy/restart count 0、3307 TCP成功。SQL前の認証段階でRSA公開鍵関連のドライバーエラーを確認。テストデータの書き込みなし。",
+      "limit": "RSA公開鍵の信頼確認・固定、または検証済みTLSの利用は追加承認が必要。allowPublicKeyRetrievalの無条件有効化、DB初期化、migration、ユーザー/パスワード変更はしていない。実DB回帰は未完了。本番・AWSへ接続しない。",
+      "topic": "project-search",
+      "files": [
+        "tests/project-search-db.test.mjs",
+        "examples/mysql/auth-check.ts",
+        "examples/mysql/schema-check-settings.mjs",
+        "compose.dev.yaml",
+        "docs/VERIFICATION.md"
+      ]
+    },
+    {
+      "date": "2026-11-24",
+      "title": "案件検索・絞り込みとURL復元（実DBは未検証）",
+      "changes": [
+        "案件名・番号、主副担当、状態、進捗率をサーバー側で検索。総件数・通常/保管・カーソルに同じチーム制限を適用。",
+        "入力と適用条件を分け、URL・戻る/進む・チーム切替・追加取得・再試行へ接続。スマホ幅の詳細条件フォームを追加。",
+        "関連テスト・実Chromeの模擬API試験・型検査・buildを確認。学習ノートと非機能要件へ検証不能な実DB範囲も記録。"
+      ],
+      "why": "ページ分割済み一覧の見落としを防ぎ、検索結果を再現できるようにする。",
+      "proof": "本体・API型検査成功。関連124件成功（今回の条件・模擬API28件を含む）。実Chrome14項目成功、1440/390幅の画像を保存。API応答は架空であり認証・実DBの通し試験ではない。通常権限でNext.js build成功。",
+      "limit": "ローカル検証DBのTCP接続がECONNREFUSED。DB名・CURRENT_USERの実接続照合と実MySQL検索・HTTP/DB・所属失効の実試験は未実施。文字照合順序、LIKEの%・_・バックスラッシュ、大量データの実行計画・性能は要確認。本番未反映。 CDは保留・executionAllowed:falseのまま。外部接続・コミット・本番変更なし。",
+      "topic": "project-search",
+      "files": [
+        "components/siteflow/project-list.tsx",
+        "components/siteflow/workspace-location.ts",
+        "examples/mysql/project-search.ts",
+        "examples/mysql/web-api-handler.ts",
+        "lib/siteflow/domain.ts",
+        "tests/project-search.test.mjs",
+        "tests/project-search-api.test.mjs",
+        "tests/project-search-db.test.mjs"
+      ]
+    },
+    {
+      "date": "2026-11-24",
+      "title": "CDを一時中断し、機能開発へ戻るための保存準備",
+      "changes": [
+        "89項目をK1〜K4の保存単位へ分類。生成キャッシュ2件を除外し、資料の実環境識別子をプレースホルダーへ整理。",
+        "現行CIのAction SHA固定完了と、保留AWS方式の未確定pinを区別。旧履歴は当時の記録として保持。",
         "再開時の個別承認・実GitHub確認・隔離Linux試験・本番導入前確認を既存資料へ記録。追加承認に基づき、保留AWSコード／設定例の実環境情報も例示値へ整理。無効化と完全一致の対象制限は維持。"
-  ],
-  "why": "ローカルコミットは作業を保存する操作で、本番への配信とは別です。関連するコードとテストを同じ単位にし、依存先が欠けたコミットを避けます。K1はpollingモデル、K2は保留AWSとCI契約、K3は資料、K4は開発規約。",
+      ],
+      "why": "ローカルコミットは作業を保存する操作で、本番への配信とは別です。関連するコードとテストを同じ単位にし、依存先が欠けたコミットを避けます。K1はpollingモデル、K2は保留AWSとCI契約、K3は資料、K4は開発規約。",
       "proof": "既存1026件成功は過去の結果として再利用。公開用整理後のAWS・CI関連203件は成功、失敗0件、ESLintはエラー・警告0件。設定例の拒否とIAMの対象制限を追加確認した。資料構文・秘密情報・ステージ対象も確認する。SHA固定は現行ci.ymlの6参照、保留AWS側の全0 pinは有効化しない。",
       "limit": "例示値は実環境操作用の設定ではない。外部接続・push・Actions・pending run操作・本番操作は行わない。チェックサムは署名ではなく、実Linux・実通知・実復旧は未検証。本番CDはNO-GO。",
-  "topic": "poll-incident-m5",
-  "files": ["docs/APPROVED_CD_SETUP.md", "docs/LEARNING_GUIDE.html", "docs/AWS_CD_STAGE1.md", "docs/EC2_PAT_READONLY_PLAN.md"]
-},
-{
-  "date": "2026-11-24",
-  "title": "incident v2：日時を含む破損検出と、復旧計画の仕様を記録",
-  "changes": [
-    "既存M5テーマをv2へ更新。IDと全体チェックサムの対象、v1を保全して拒否する理由を整理。",
-    "状態破損・保存不能、通知計画の300秒抑制、故障stableから正常rollbackへの照合と別承認を説明。",
-    "直近1026件成功・修正差分レビューPASSを過去の実行結果として追記。本番未検証と実操作禁止を維持。"
-  ],
-  "why": "仕様がv1のままだと、日時の改変検出や旧記録の扱いを誤解するため。図は事故記録→IDで通知を集約→全体チェックサム→人が復旧を判断。30秒の説明：事故の識別と記録の破損検出は別で、通知できても事故は解決していません。問いと練習は同じM5テーマに集約する。",
-  "proof": "今回は文書2ファイルだけを更新。コード根拠と照合し、教材JSON/JavaScript構文・HTMLタグ対応・ID/リンクを静的確認。87テーマのIDと既存132件の開発履歴を保持し、履歴1件だけを追記。1026件成功は前回の検証結果で、今回の回帰テスト再実行ではない。",
-  "limit": "コード・依存・Git反映・外部接続・本番操作なし。実Linux・実通知・実復旧は未検証。本番CDはNO-GO、チェックサムは署名ではない。",
-  "topic": "poll-incident-m5",
-  "files": ["docs/APPROVED_CD_SETUP.md", "docs/LEARNING_GUIDE.html", "deploy/poll/incident.mjs", "deploy/poll/integration.mjs", "deploy/poll/boot-recovery.mjs", "deploy/poll/recovery.mjs"]
-},
-{
-  "date": "2026-11-24",
-  "title": "M5：障害記録・通知計画・手動復旧を分離",
-  "changes": [
-    "許可項目だけの永続障害記録と通知試行を追加。書込失敗・不明な状態を成功扱いしない。",
-    "6段階の復旧計画と再開前チェックを追加。STOP中は稼働中stableの確認のみ、3002・migration・自動解除は禁止。",
-    "Next.js用の運用手順と学習図を追記。M4を含む既存テストを保持し、模擬成功と本番検証を区別。"
-  ],
-  "why": "障害時も古い承認や不明な整理状態から自動配信を再開させないため。通知を予約した記録、模擬送信結果、事故解決は別々に扱う。",
-  "proof": "M5追加68＋既存932＝1000件成功、失敗・skip0。ESLint対象5ファイル0/0。初回回帰で完了済みIDの再利用拒否を事故と誤記録する1失敗を検出。今回消費した配信の失敗と開始前の通常拒否を分離し、既存テストを緩めず全回帰を再実行して成功。",
-  "limit": "実API/認証/通知/EC2操作なし。incident解除入口は作らない。M4の実Docker削除・Linuxの永続性・Certbot競合は未検証で本番CDはNO-GO。",
-  "topic": "poll-incident-m5",
-  "files": ["deploy/poll/incident.mjs", "deploy/poll/persistent-state.mjs", "deploy/poll/integration.mjs", "deploy/poll/recovery.mjs", "tests/poll-incident.test.mjs", "docs/APPROVED_CD_SETUP.md"]
-},
-{
-  "date": "2026-11-24",
-  "title": "M3：生成する承認記録をpolling側の契約へ合わせる",
-  "changes": [
-    "同じrunのCI成功→production本人承認→厳密trueの許可→JSON/artifact生成へ戻し、保留AWS producerだけをCIから外した。実配信やmigrationは追加していない。",
-    "app/migrationのOCI digestをbuild outputsから引き継ぎ、ZIP digestと区別。実workflowの契約と不正な変更をNode標準のテストで検査する。",
-    "未確定Action pinは推測せず未解決として残す。既存pendingの同groupへpush/mergeしない停止条件と、別承認での確認項目を記録した。"
-  ],
-  "why": "生成側producerと取得側consumerの約束が違うと、安全な拒否が続き配信できない。図で読むとCI成功 → 本人承認 → 現在の許可 → 固定digest入りJSON → 別のpolling検証。30秒の説明：承認は本人の意思、許可変数は現在も配信してよいか、digestは対象そのものを表す指紋で、別々に確認する。考える問い：承認済みでもfalseなら何を作ってはいけないか。小さな練習：workflowでneeds・environment・2つのgateを探し、なぜ必要か自分の言葉で説明する。",
-  "proof": "既存852＋M3追加34＝886件を分割実行で確認。回帰884件後に拒否2件を追加し最終契約suite52件を再実行、すべて成功・失敗/skip0。AWS関連141件成功、ESLint対象2ファイル0/0。既存js-yamlでYAML構文/2jobs、教材JSONで86テーマIDと過去130履歴の保持を確認。concurrencyとpollingのexecutionAllowed:falseを維持。",
-  "limit": "GitHub反映・Actions実行・production承認・実API・本番操作はなし。全0Action SHAは有効な固定pinではないため反映NO-GO。既存js-yamlの構文解析と限定的な契約検査は、実GitHubの承認保護・式・artifact動作を証明しない。concurrencyの同group pendingが残る間は将来のpush/mergeも停止し、実run確認・処置は別承認。旧AWS/OIDC記録は当時の履歴として保持。",
-  "topic": "approved-cd-preparation",
-  "files": [".github/workflows/ci.yml", "tests/aws-cd.test.mjs", "tests/poll-workflow-policy.test.mjs", "docs/APPROVED_CD_SETUP.md", "deploy/release-record.mjs"]
-},
-{
-  "date": "2026-11-23",
-  "title": "会議ルールをCIへ追加し、公開状態の説明を整理",
-  "changes": [
-    "Node準備後に会議ルール13件を追加する3行だけをCIの公開候補にする。既存のCD保留差分は維持。",
-    "READMEに会議差分はローカル実装・検証済み、本番未反映と記載。自動デプロイ未導入を維持。",
-    "型検査・lint・build・関連100件と候補CIの構造を再確認。公開候補13ファイルの追加行を点検。"
-  ],
-  "why": "CIは変更を自動検査する仕組み、CDは検査した版を公開環境へ届ける仕組み。テスト追加だけでCDを有効にしない。Gitでは1ファイルに複数の目的の差分が同居できるため、今回はci.ymlの追加3行だけを将来の反映対象にする。",
-  "proof": "本体/API型検査・lint・build・関連100件（会議13件含む）成功。候補YAML解析、既存CI設定保持、失敗無視なし、GHCR/main条件・production後続依存を検査。パッチ適用可否のみ確認、ステージなし。",
-  "limit": "ローカルNode24.20.0での結果。GitHub/Node22での実行は未確認。HTTP/DB15件・Chrome12項目は直前の表示修正時の成功であり、今回再実行していない。保留差分を含むci.yml全体のpushは不可。本番・AWS・Gitへの反映なし。",
-  "topic": "meeting-progress",
-  "files": [
-    "README.md",
-    ".github/workflows/ci.yml",
-    "tests/meeting-domain.test.mjs",
-    "docs/MEETING_FLOW.md"
-  ]
-},
-{
-  "date": "2026-11-23",
-  "title": "記録なし・未確認の案件でも現在の状態名を表示",
-  "changes": [
-    "状態名と状態の比較の表示条件を分離し、初回会議でも現在の状態を表示。",
-    "終了済みは確認時の状態と現在の案件情報を区別し、未確認の過去状態は推測しない。",
-    "Chromeの3ケースを追加して全検証を再実行。CI・README・性能確認は案だけ整理。"
-  ],
-  "why": "前回記録は比較の条件であり、現在の状態を知るための条件ではないため。保存・取消・差分計算を変更せずに、表示漏れだけを直す。",
-  "proof": "2026-11-23再検証：本体/API型検査・lint・build、業務55件、HTTP/DB15件、実Chrome会議12項目（状態表示の3項目追加）・従来統合5項目成功。PC1440px/スマホ390pxの画像を確認。前回なし/未確認/確認取消後の現在状態、終了済みの当時状態と現在状態の分離を確認した。",
-  "limit": "本番未反映。CIとREADMEは未変更。大量履歴のEXPLAIN・索引/負荷測定、全ブラウザー・読み上げは未実施。DB構造・CD/OIDC・本番設定は変更しない。",
-  "topic": "meeting-progress",
-  "files": [
-    "components/siteflow/meeting-workspace.tsx",
-    "examples/mysql/check-meeting-browser.mjs",
-    "docs/MEETING_FLOW.md",
-    "docs/VERIFICATION.md"
-  ]
-},
-{
-  "date": "2026-11-22",
-  "title": "会議の進捗・状態差分を既存記録から表示",
-  "changes": [
-    "前回の有効確認を一括取得し、増減ポイント・状態変更・比較元日時・記録なしを表示。",
-    "会議中の自動更新と確認後の変更表示、終了済みの確認値と現在値の分離を追加。",
-    "DB構造は維持し、実DB/Chromeテストと学習テーマ・図を追加。"
-  ],
-  "why": "何が前回から変わったかを、過去の共有記録を壊さず会議で説明できるようにするため。",
-  "proof": "業務55件（新規9）、会議HTTP/実DB15件（新規4）、実Chrome会議9項目、従来統合5項目成功。1440px/390pxの画像・横はみ出し・自動更新・キーボード・終了後保持を確認。本体/検証API型検査、全体lint、build成功。 DB起動後の初回公開鍵認証と、制限環境のbuild失敗は安全な切り分け後に再試験成功。",
-  "limit": "本番未反映。大量の過去履歴の性能・全ブラウザー・読み上げは未検証。担当/納期の変更判定、重要業務優先、相談事項、決定事項、招待は今回の範囲外。CD/OIDCは保留。 正式DB・AWS・Git・CDへの操作なし。",
-  "topic": "meeting-progress",
-  "files": [
-    "lib/siteflow/domain.ts",
-    "examples/mysql/meeting-service.ts",
-    "components/siteflow/meeting-workspace.tsx",
-    "docs/MEETING_FLOW.md"
-  ]
-},
-{
-  "date": "2026-11-21",
-  "title": "公開実績の11ファイルをGitHub用に整理",
-  "changes": [
-    "AWS識別子と個人PCパスを匿名化し、公開用スクリプトはEBS照合で止まる仮値へ変更。",
-    "READMEに公開実績・未完成機能・自動デプロイ未導入を明記。",
-    "手動公開の資料・運用コード・テストだけを対象とし、保留中CDとローカル生成物は分離。"
-  ],
-  "why": "稼働中の設定を変えずに、公開実績を説明できる資料と再利用可能な運用コードを公開するため。",
-  "proof": "対象は11ファイル。学習履歴・テーマIDは保持。既存のCD関連・ローカル指示・キャッシュは今回変更しない。秘密情報とステージ対象はコミット前に別途照合する。",
-  "limit": "EC2設定変更・push・Actions実行は対象外。公開用スクリプトは仮値を実構成へ合わせるまで実行不可。保留中CDのソースはGitHub未反映。",
-  "topic": "manual-first-public-release",
-  "files": [
-    "README.md",
-    "docs/MANUAL_PUBLIC_RELEASE.md",
-    "deploy/manual-public.py",
-    "tests/manual-public.test.py"
-  ]
-},
-{
-  "date": "2026-11-21",
-  "title": "Next.js＋MySQLの初回公開と認証・保存確認に成功",
-  "changes": [
-    "検証枠を所有者UID1000へ合わせた。秘密ファイルは600のまま、コードは標準入力から渡す。",
-    "新workerと公開ready200/ok:trueを3回確認。ログイン・Cookie・テスト案件37%保存/再取得・ログアウトに成功。",
-    "Next.js公開を維持。旧Vinextは復旧用に稼働し、既存案件とコンテナは変えていない。"
-  ],
-  "why": "秘密ファイルを他人も読めるようにせず、必要な検証処理だけを正当な所有者として実行するため。最小権限とは、必要な人・処理に必要な操作だけを許すこと。",
-  "proof": "公開HTTPS経由のHTTP試験すべて成功。CookieはSecure/HttpOnly/SameSite=Lax。新規案件を除くProjectの指紋とコンテナID/開始時刻は一致、MySQL healthy、Nginx error以上0件。Windowsからも証明書検証付きでok:true。",
-  "limit": "今回の実ブラウザークリック試験・実EC2再起動・長期監視・日次自動バックアップは未検証/未整備。初回版は11月17日の既存イメージ。差分表示・決定事項・招待等は未完成。以前の404の原因は確定扱いにしない。",
-  "topic": "manual-first-public-release",
-  "files": [
-    "docs/MANUAL_PUBLIC_RELEASE.md",
-    "deploy/manual-public.py",
-    "docs/AWS_DEPLOY_RUNBOOK.md",
-    "README.md"
-  ]
-},
-{
-  "date": "2026-11-21",
-  "title": "新worker・公開readyを確認後、アカウント準備で停止",
-  "changes": [
-    "新worker確認と新しいTLS接続で、公開ready200/ok:trueを3回連続確認。",
-    "検証枠とアカウントファイルの所有者が合わず、ログイン前に停止。秘密ファイルは緩めない。",
-    "旧画面の静的ファイル参照とHTTPS200を3回連続確認し、Vinextへ復帰。追加再試行なし。"
-  ],
-  "why": "切替完了待ちを追加し、旧版への復帰も応答コードだけで判断しない。別の検証枠の不備があっても秘密保護を緩めて進めない。",
-  "proof": "検証ロジックのモック10件成功。今回1回の実切替で公開ready3回成功、Next画面の静的参照一致。切り戻し後も3コンテナのID/開始時刻不変、MySQL healthy、Nginx error以上0件。",
-  "limit": "Cookie・ログイン・案件作成/保存/再取得/ログアウトは未実施。現在公開はVinext。以前の404の原因は確定扱いにしない。検証用UIDと非秘密コードの渡し方を合わせる修正案は未実施。",
-  "topic": "manual-first-public-release",
-  "files": [
-    "docs/MANUAL_PUBLIC_RELEASE.md",
-    "docs/AWS_DEPLOY_RUNBOOK.md"
-  ]
-},
-{
-  "date": "2026-11-21",
-  "title": "公開readiness 404を検知し、Vinextへ切り戻し",
-  "changes": [
-    "直前の候補・DB・証明書・S3保存版・資源余力は正常。",
-    "Nginx構文検査とreload後、公開readinessが404となり旧3002へ復帰。",
-    "ログインと案件操作へ進まず、正式DBへの業務書き込みなし。Next.js公開は未完了。"
-  ],
-  "why": "公開経路で応答できない状態のままログインやDB書き込みへ進まないため。本人承認済みの切り戻しだけを実施し、予定外の修正は行わない。",
-  "proof": "旧HTTPS200、Nginx内容は退避設定と一致。候補直接ready200、MySQL healthy、コンテナID/開始時刻不変。試行時刻のNginxエラーログにerror以上0件。",
-  "limit": "公開経由404の原因は未確定。公開Cookie・ログイン・テスト案件作成/保存/再取得/ログアウトは未実施。reload直後の旧worker到達などは可能性であり断定しない。追加修正・再公開は未実施。",
-  "topic": "manual-first-public-release",
-  "files": [
-    "docs/MANUAL_PUBLIC_RELEASE.md",
-    "docs/AWS_DEPLOY_RUNBOOK.md"
-  ]
-},
-{
-  "date": "2026-11-21",
-  "title": "既存Next.js候補の手動公開準備",
-  "changes": [
-    "11月17日の候補を固定。最新mainと同じ版とは断定しない。",
-    "EBSを照合して同じコンテナだけを起動。5分ごとに状態だけを上限付きで記録。",
-    "最新DBを暗号化してS3へ保存。Nginxの旧設定を退避し、切り替えは別承認。"
-  ],
-  "why": "新CDの完成を待たずに本体を公開するため。再作成やDB初期化を避け、今の正常な候補と旧サイトを保持する。systemdはLinuxの起動順を管理する仕組み。readinessはDBも含めて応答できるかの確認。",
-  "proof": "S3のVersionId・サイズ4,290 bytes・SHA-256と再取得が一致。旧HTTPS200、候補ready、MySQL healthy、コンテナID/開始時刻・Nginx不変。モック9件と業務42件成功、型検査/lint成功。",
-  "limit": "実EC2再起動、新unitでの停止からの復帰、長期ログローテーション、公開切替/ブラウザー操作は未検証。ローカルbuildは既存保護フォルダーの探索権限エラー。保護は緩めず、既存イメージも変更していない。",
-  "topic": "manual-first-public-release",
-  "files": [
-    "deploy/manual-public.py",
-    "deploy/siteflow-next-public.service",
-    "deploy/siteflow-mysql-manual-public.conf",
-    "deploy/siteflow-public-health.timer",
-    "tests/manual-public.test.py",
-    "docs/MANUAL_PUBLIC_RELEASE.md"
-  ]
-},
-{
-    "date":  "2026-11-21",
-    "title":  "AWSの読み取りを自動化・組織制限で構築保留",
-    "changes":  [
-                    "既存CloudShellを自動操作し、SSM用ポリシーv2の全文を確認。",
-                    "OIDC確認のSCP拒否を記録し、新規リソース作成を保留。",
-                    "高度な機能の有効化は別承認が必要と整理。"
-                ],
-    "why":  "操作の自動化と、AWS側で許可される操作は別だから。SCPは組織全体の操作上限を決めるルール。",
-    "proof":  "自動のポリシー読み取り成功。本人の確認では対象EC2正常・公開HTTPS 200。AWS設定変更・リソース作成なし。",
-    "limit":  "適用SCP本文と候補アプリ・MySQLの現在のプロセス状態は未確認。基盤構築未完了。高度な機能の有効化は不可逆で別承認。",
-    "topic":  "aws-cd-review-fixes",
-    "files":  [
-                  "docs/AWS_CD_STAGE1.md"
-              ]
-},
+      "topic": "poll-incident-m5",
+      "files": [
+        "docs/APPROVED_CD_SETUP.md",
+        "docs/LEARNING_GUIDE.html",
+        "docs/AWS_CD_STAGE1.md",
+        "docs/EC2_PAT_READONLY_PLAN.md"
+      ]
+    },
+    {
+      "date": "2026-11-24",
+      "title": "incident v2：日時を含む破損検出と、復旧計画の仕様を記録",
+      "changes": [
+        "既存M5テーマをv2へ更新。IDと全体チェックサムの対象、v1を保全して拒否する理由を整理。",
+        "状態破損・保存不能、通知計画の300秒抑制、故障stableから正常rollbackへの照合と別承認を説明。",
+        "直近1026件成功・修正差分レビューPASSを過去の実行結果として追記。本番未検証と実操作禁止を維持。"
+      ],
+      "why": "仕様がv1のままだと、日時の改変検出や旧記録の扱いを誤解するため。図は事故記録→IDで通知を集約→全体チェックサム→人が復旧を判断。30秒の説明：事故の識別と記録の破損検出は別で、通知できても事故は解決していません。問いと練習は同じM5テーマに集約する。",
+      "proof": "今回は文書2ファイルだけを更新。コード根拠と照合し、教材JSON/JavaScript構文・HTMLタグ対応・ID/リンクを静的確認。87テーマのIDと既存132件の開発履歴を保持し、履歴1件だけを追記。1026件成功は前回の検証結果で、今回の回帰テスト再実行ではない。",
+      "limit": "コード・依存・Git反映・外部接続・本番操作なし。実Linux・実通知・実復旧は未検証。本番CDはNO-GO、チェックサムは署名ではない。",
+      "topic": "poll-incident-m5",
+      "files": [
+        "docs/APPROVED_CD_SETUP.md",
+        "docs/LEARNING_GUIDE.html",
+        "deploy/poll/incident.mjs",
+        "deploy/poll/integration.mjs",
+        "deploy/poll/boot-recovery.mjs",
+        "deploy/poll/recovery.mjs"
+      ]
+    },
+    {
+      "date": "2026-11-24",
+      "title": "M5：障害記録・通知計画・手動復旧を分離",
+      "changes": [
+        "許可項目だけの永続障害記録と通知試行を追加。書込失敗・不明な状態を成功扱いしない。",
+        "6段階の復旧計画と再開前チェックを追加。STOP中は稼働中stableの確認のみ、3002・migration・自動解除は禁止。",
+        "Next.js用の運用手順と学習図を追記。M4を含む既存テストを保持し、模擬成功と本番検証を区別。"
+      ],
+      "why": "障害時も古い承認や不明な整理状態から自動配信を再開させないため。通知を予約した記録、模擬送信結果、事故解決は別々に扱う。",
+      "proof": "M5追加68＋既存932＝1000件成功、失敗・skip0。ESLint対象5ファイル0/0。初回回帰で完了済みIDの再利用拒否を事故と誤記録する1失敗を検出。今回消費した配信の失敗と開始前の通常拒否を分離し、既存テストを緩めず全回帰を再実行して成功。",
+      "limit": "実API/認証/通知/EC2操作なし。incident解除入口は作らない。M4の実Docker削除・Linuxの永続性・Certbot競合は未検証で本番CDはNO-GO。",
+      "topic": "poll-incident-m5",
+      "files": [
+        "deploy/poll/incident.mjs",
+        "deploy/poll/persistent-state.mjs",
+        "deploy/poll/integration.mjs",
+        "deploy/poll/recovery.mjs",
+        "tests/poll-incident.test.mjs",
+        "docs/APPROVED_CD_SETUP.md"
+      ]
+    },
+    {
+      "date": "2026-11-24",
+      "title": "M3：生成する承認記録をpolling側の契約へ合わせる",
+      "changes": [
+        "同じrunのCI成功→production本人承認→厳密trueの許可→JSON/artifact生成へ戻し、保留AWS producerだけをCIから外した。実配信やmigrationは追加していない。",
+        "app/migrationのOCI digestをbuild outputsから引き継ぎ、ZIP digestと区別。実workflowの契約と不正な変更をNode標準のテストで検査する。",
+        "未確定Action pinは推測せず未解決として残す。既存pendingの同groupへpush/mergeしない停止条件と、別承認での確認項目を記録した。"
+      ],
+      "why": "生成側producerと取得側consumerの約束が違うと、安全な拒否が続き配信できない。図で読むとCI成功 → 本人承認 → 現在の許可 → 固定digest入りJSON → 別のpolling検証。30秒の説明：承認は本人の意思、許可変数は現在も配信してよいか、digestは対象そのものを表す指紋で、別々に確認する。考える問い：承認済みでもfalseなら何を作ってはいけないか。小さな練習：workflowでneeds・environment・2つのgateを探し、なぜ必要か自分の言葉で説明する。",
+      "proof": "既存852＋M3追加34＝886件を分割実行で確認。回帰884件後に拒否2件を追加し最終契約suite52件を再実行、すべて成功・失敗/skip0。AWS関連141件成功、ESLint対象2ファイル0/0。既存js-yamlでYAML構文/2jobs、教材JSONで86テーマIDと過去130履歴の保持を確認。concurrencyとpollingのexecutionAllowed:falseを維持。",
+      "limit": "GitHub反映・Actions実行・production承認・実API・本番操作はなし。全0Action SHAは有効な固定pinではないため反映NO-GO。既存js-yamlの構文解析と限定的な契約検査は、実GitHubの承認保護・式・artifact動作を証明しない。concurrencyの同group pendingが残る間は将来のpush/mergeも停止し、実run確認・処置は別承認。旧AWS/OIDC記録は当時の履歴として保持。",
+      "topic": "approved-cd-preparation",
+      "files": [
+        ".github/workflows/ci.yml",
+        "tests/aws-cd.test.mjs",
+        "tests/poll-workflow-policy.test.mjs",
+        "docs/APPROVED_CD_SETUP.md",
+        "deploy/release-record.mjs"
+      ]
+    },
+    {
+      "date": "2026-11-23",
+      "title": "会議ルールをCIへ追加し、公開状態の説明を整理",
+      "changes": [
+        "Node準備後に会議ルール13件を追加する3行だけをCIの公開候補にする。既存のCD保留差分は維持。",
+        "READMEに会議差分はローカル実装・検証済み、本番未反映と記載。自動デプロイ未導入を維持。",
+        "型検査・lint・build・関連100件と候補CIの構造を再確認。公開候補13ファイルの追加行を点検。"
+      ],
+      "why": "CIは変更を自動検査する仕組み、CDは検査した版を公開環境へ届ける仕組み。テスト追加だけでCDを有効にしない。Gitでは1ファイルに複数の目的の差分が同居できるため、今回はci.ymlの追加3行だけを将来の反映対象にする。",
+      "proof": "本体/API型検査・lint・build・関連100件（会議13件含む）成功。候補YAML解析、既存CI設定保持、失敗無視なし、GHCR/main条件・production後続依存を検査。パッチ適用可否のみ確認、ステージなし。",
+      "limit": "ローカルNode24.20.0での結果。GitHub/Node22での実行は未確認。HTTP/DB15件・Chrome12項目は直前の表示修正時の成功であり、今回再実行していない。保留差分を含むci.yml全体のpushは不可。本番・AWS・Gitへの反映なし。",
+      "topic": "meeting-progress",
+      "files": [
+        "README.md",
+        ".github/workflows/ci.yml",
+        "tests/meeting-domain.test.mjs",
+        "docs/MEETING_FLOW.md"
+      ]
+    },
+    {
+      "date": "2026-11-23",
+      "title": "記録なし・未確認の案件でも現在の状態名を表示",
+      "changes": [
+        "状態名と状態の比較の表示条件を分離し、初回会議でも現在の状態を表示。",
+        "終了済みは確認時の状態と現在の案件情報を区別し、未確認の過去状態は推測しない。",
+        "Chromeの3ケースを追加して全検証を再実行。CI・README・性能確認は案だけ整理。"
+      ],
+      "why": "前回記録は比較の条件であり、現在の状態を知るための条件ではないため。保存・取消・差分計算を変更せずに、表示漏れだけを直す。",
+      "proof": "2026-11-23再検証：本体/API型検査・lint・build、業務55件、HTTP/DB15件、実Chrome会議12項目（状態表示の3項目追加）・従来統合5項目成功。PC1440px/スマホ390pxの画像を確認。前回なし/未確認/確認取消後の現在状態、終了済みの当時状態と現在状態の分離を確認した。",
+      "limit": "本番未反映。CIとREADMEは未変更。大量履歴のEXPLAIN・索引/負荷測定、全ブラウザー・読み上げは未実施。DB構造・CD/OIDC・本番設定は変更しない。",
+      "topic": "meeting-progress",
+      "files": [
+        "components/siteflow/meeting-workspace.tsx",
+        "examples/mysql/check-meeting-browser.mjs",
+        "docs/MEETING_FLOW.md",
+        "docs/VERIFICATION.md"
+      ]
+    },
+    {
+      "date": "2026-11-22",
+      "title": "会議の進捗・状態差分を既存記録から表示",
+      "changes": [
+        "前回の有効確認を一括取得し、増減ポイント・状態変更・比較元日時・記録なしを表示。",
+        "会議中の自動更新と確認後の変更表示、終了済みの確認値と現在値の分離を追加。",
+        "DB構造は維持し、実DB/Chromeテストと学習テーマ・図を追加。"
+      ],
+      "why": "何が前回から変わったかを、過去の共有記録を壊さず会議で説明できるようにするため。",
+      "proof": "業務55件（新規9）、会議HTTP/実DB15件（新規4）、実Chrome会議9項目、従来統合5項目成功。1440px/390pxの画像・横はみ出し・自動更新・キーボード・終了後保持を確認。本体/検証API型検査、全体lint、build成功。 DB起動後の初回公開鍵認証と、制限環境のbuild失敗は安全な切り分け後に再試験成功。",
+      "limit": "本番未反映。大量の過去履歴の性能・全ブラウザー・読み上げは未検証。担当/納期の変更判定、重要業務優先、相談事項、決定事項、招待は今回の範囲外。CD/OIDCは保留。 正式DB・AWS・Git・CDへの操作なし。",
+      "topic": "meeting-progress",
+      "files": [
+        "lib/siteflow/domain.ts",
+        "examples/mysql/meeting-service.ts",
+        "components/siteflow/meeting-workspace.tsx",
+        "docs/MEETING_FLOW.md"
+      ]
+    },
+    {
+      "date": "2026-11-21",
+      "title": "公開実績の11ファイルをGitHub用に整理",
+      "changes": [
+        "AWS識別子と個人PCパスを匿名化し、公開用スクリプトはEBS照合で止まる仮値へ変更。",
+        "READMEに公開実績・未完成機能・自動デプロイ未導入を明記。",
+        "手動公開の資料・運用コード・テストだけを対象とし、保留中CDとローカル生成物は分離。"
+      ],
+      "why": "稼働中の設定を変えずに、公開実績を説明できる資料と再利用可能な運用コードを公開するため。",
+      "proof": "対象は11ファイル。学習履歴・テーマIDは保持。既存のCD関連・ローカル指示・キャッシュは今回変更しない。秘密情報とステージ対象はコミット前に別途照合する。",
+      "limit": "EC2設定変更・push・Actions実行は対象外。公開用スクリプトは仮値を実構成へ合わせるまで実行不可。保留中CDのソースはGitHub未反映。",
+      "topic": "manual-first-public-release",
+      "files": [
+        "README.md",
+        "docs/MANUAL_PUBLIC_RELEASE.md",
+        "deploy/manual-public.py",
+        "tests/manual-public.test.py"
+      ]
+    },
+    {
+      "date": "2026-11-21",
+      "title": "Next.js＋MySQLの初回公開と認証・保存確認に成功",
+      "changes": [
+        "検証枠を所有者UID1000へ合わせた。秘密ファイルは600のまま、コードは標準入力から渡す。",
+        "新workerと公開ready200/ok:trueを3回確認。ログイン・Cookie・テスト案件37%保存/再取得・ログアウトに成功。",
+        "Next.js公開を維持。旧Vinextは復旧用に稼働し、既存案件とコンテナは変えていない。"
+      ],
+      "why": "秘密ファイルを他人も読めるようにせず、必要な検証処理だけを正当な所有者として実行するため。最小権限とは、必要な人・処理に必要な操作だけを許すこと。",
+      "proof": "公開HTTPS経由のHTTP試験すべて成功。CookieはSecure/HttpOnly/SameSite=Lax。新規案件を除くProjectの指紋とコンテナID/開始時刻は一致、MySQL healthy、Nginx error以上0件。Windowsからも証明書検証付きでok:true。",
+      "limit": "今回の実ブラウザークリック試験・実EC2再起動・長期監視・日次自動バックアップは未検証/未整備。初回版は11月17日の既存イメージ。差分表示・決定事項・招待等は未完成。以前の404の原因は確定扱いにしない。",
+      "topic": "manual-first-public-release",
+      "files": [
+        "docs/MANUAL_PUBLIC_RELEASE.md",
+        "deploy/manual-public.py",
+        "docs/AWS_DEPLOY_RUNBOOK.md",
+        "README.md"
+      ]
+    },
+    {
+      "date": "2026-11-21",
+      "title": "新worker・公開readyを確認後、アカウント準備で停止",
+      "changes": [
+        "新worker確認と新しいTLS接続で、公開ready200/ok:trueを3回連続確認。",
+        "検証枠とアカウントファイルの所有者が合わず、ログイン前に停止。秘密ファイルは緩めない。",
+        "旧画面の静的ファイル参照とHTTPS200を3回連続確認し、Vinextへ復帰。追加再試行なし。"
+      ],
+      "why": "切替完了待ちを追加し、旧版への復帰も応答コードだけで判断しない。別の検証枠の不備があっても秘密保護を緩めて進めない。",
+      "proof": "検証ロジックのモック10件成功。今回1回の実切替で公開ready3回成功、Next画面の静的参照一致。切り戻し後も3コンテナのID/開始時刻不変、MySQL healthy、Nginx error以上0件。",
+      "limit": "Cookie・ログイン・案件作成/保存/再取得/ログアウトは未実施。現在公開はVinext。以前の404の原因は確定扱いにしない。検証用UIDと非秘密コードの渡し方を合わせる修正案は未実施。",
+      "topic": "manual-first-public-release",
+      "files": [
+        "docs/MANUAL_PUBLIC_RELEASE.md",
+        "docs/AWS_DEPLOY_RUNBOOK.md"
+      ]
+    },
+    {
+      "date": "2026-11-21",
+      "title": "公開readiness 404を検知し、Vinextへ切り戻し",
+      "changes": [
+        "直前の候補・DB・証明書・S3保存版・資源余力は正常。",
+        "Nginx構文検査とreload後、公開readinessが404となり旧3002へ復帰。",
+        "ログインと案件操作へ進まず、正式DBへの業務書き込みなし。Next.js公開は未完了。"
+      ],
+      "why": "公開経路で応答できない状態のままログインやDB書き込みへ進まないため。本人承認済みの切り戻しだけを実施し、予定外の修正は行わない。",
+      "proof": "旧HTTPS200、Nginx内容は退避設定と一致。候補直接ready200、MySQL healthy、コンテナID/開始時刻不変。試行時刻のNginxエラーログにerror以上0件。",
+      "limit": "公開経由404の原因は未確定。公開Cookie・ログイン・テスト案件作成/保存/再取得/ログアウトは未実施。reload直後の旧worker到達などは可能性であり断定しない。追加修正・再公開は未実施。",
+      "topic": "manual-first-public-release",
+      "files": [
+        "docs/MANUAL_PUBLIC_RELEASE.md",
+        "docs/AWS_DEPLOY_RUNBOOK.md"
+      ]
+    },
+    {
+      "date": "2026-11-21",
+      "title": "既存Next.js候補の手動公開準備",
+      "changes": [
+        "11月17日の候補を固定。最新mainと同じ版とは断定しない。",
+        "EBSを照合して同じコンテナだけを起動。5分ごとに状態だけを上限付きで記録。",
+        "最新DBを暗号化してS3へ保存。Nginxの旧設定を退避し、切り替えは別承認。"
+      ],
+      "why": "新CDの完成を待たずに本体を公開するため。再作成やDB初期化を避け、今の正常な候補と旧サイトを保持する。systemdはLinuxの起動順を管理する仕組み。readinessはDBも含めて応答できるかの確認。",
+      "proof": "S3のVersionId・サイズ4,290 bytes・SHA-256と再取得が一致。旧HTTPS200、候補ready、MySQL healthy、コンテナID/開始時刻・Nginx不変。モック9件と業務42件成功、型検査/lint成功。",
+      "limit": "実EC2再起動、新unitでの停止からの復帰、長期ログローテーション、公開切替/ブラウザー操作は未検証。ローカルbuildは既存保護フォルダーの探索権限エラー。保護は緩めず、既存イメージも変更していない。",
+      "topic": "manual-first-public-release",
+      "files": [
+        "deploy/manual-public.py",
+        "deploy/siteflow-next-public.service",
+        "deploy/siteflow-mysql-manual-public.conf",
+        "deploy/siteflow-public-health.timer",
+        "tests/manual-public.test.py",
+        "docs/MANUAL_PUBLIC_RELEASE.md"
+      ]
+    },
+    {
+      "date": "2026-11-21",
+      "title": "AWSの読み取りを自動化・組織制限で構築保留",
+      "changes": [
+        "既存CloudShellを自動操作し、SSM用ポリシーv2の全文を確認。",
+        "OIDC確認のSCP拒否を記録し、新規リソース作成を保留。",
+        "高度な機能の有効化は別承認が必要と整理。"
+      ],
+      "why": "操作の自動化と、AWS側で許可される操作は別だから。SCPは組織全体の操作上限を決めるルール。",
+      "proof": "自動のポリシー読み取り成功。本人の確認では対象EC2正常・公開HTTPS 200。AWS設定変更・リソース作成なし。",
+      "limit": "適用SCP本文と候補アプリ・MySQLの現在のプロセス状態は未確認。基盤構築未完了。高度な機能の有効化は不可逆で別承認。",
+      "topic": "aws-cd-review-fixes",
+      "files": [
+        "docs/AWS_CD_STAGE1.md"
+      ]
+    },
     {
       "date": "2026-11-21",
       "title": "新CDの確定・停止・復旧を修正",
@@ -4179,7 +4750,7 @@
         "docs/S3_BACKUP_APPROVAL.md",
         "docs/PREDEPLOY_VALIDATION.md",
         "docs/AWS_DEPLOY_RUNBOOK.md",
-        "deploy/backup/role-policy.json",
+        "deploy/backup/role-policy.example.json",
         "AGENTS.md"
       ]
     },
@@ -4199,7 +4770,7 @@
         "docs/S3_BACKUP_APPROVAL.md",
         "docs/PREDEPLOY_VALIDATION.md",
         "docs/AWS_DEPLOY_RUNBOOK.md",
-        "deploy/backup/role-policy.json"
+        "deploy/backup/role-policy.example.json"
       ]
     },
     {
@@ -4218,7 +4789,7 @@
         "docs/S3_BACKUP_APPROVAL.md",
         "docs/PREDEPLOY_VALIDATION.md",
         "docs/AWS_DEPLOY_RUNBOOK.md",
-        "deploy/backup/role-policy.json"
+        "deploy/backup/role-policy.example.json"
       ]
     },
     {
@@ -4237,7 +4808,7 @@
         "docs/S3_BACKUP_APPROVAL.md",
         "docs/PREDEPLOY_VALIDATION.md",
         "docs/AWS_DEPLOY_RUNBOOK.md",
-        "deploy/backup/role-policy.json"
+        "deploy/backup/role-policy.example.json"
       ]
     },
     {
@@ -4256,7 +4827,7 @@
         "docs/S3_BACKUP_APPROVAL.md",
         "docs/PREDEPLOY_VALIDATION.md",
         "docs/AWS_DEPLOY_RUNBOOK.md",
-        "deploy/backup/role-policy.json"
+        "deploy/backup/role-policy.example.json"
       ]
     },
     {
@@ -4275,7 +4846,7 @@
         "docs/S3_BACKUP_APPROVAL.md",
         "docs/PREDEPLOY_VALIDATION.md",
         "docs/AWS_DEPLOY_RUNBOOK.md",
-        "deploy/backup/role-policy.json"
+        "deploy/backup/role-policy.example.json"
       ]
     },
     {
@@ -4294,7 +4865,7 @@
         "docs/S3_BACKUP_APPROVAL.md",
         "docs/PREDEPLOY_VALIDATION.md",
         "docs/AWS_DEPLOY_RUNBOOK.md",
-        "deploy/backup/role-policy.json"
+        "deploy/backup/role-policy.example.json"
       ]
     },
     {
@@ -4413,7 +4984,7 @@
         "自動mount/DB未設定の区別を記録へ反映。"
       ],
       "why": "既存dataを隠さず追加diskだけを専用dirへ接続し、旧公開を守りながら次の保存先設定へ進めるため。",
-      "proof": "06:40 JST、UUID<DATA_EBS_UUID>のXFSを/srv/siteflow-mysqlへmount。3種のprobe一致、root/fstab/Nginx/3container不変、HTTPS200。",
+      "proof": "06:40 JST、UUID\u003cDATA_EBS_UUID>のXFSを/srv/siteflow-mysqlへmount。3種のprobe一致、root/fstab/Nginx/3container不変、HTTPS200。",
       "limit": "自動mount/DB起動保護/DB用subdir/Docker volume/MySQL/Next/push/公開は未実施。再起動で自動接続する設定はまだなく、DB保存/backup復元は未検証。",
       "topic": "aws-reuse-plan",
       "files": [
@@ -4687,7 +5258,7 @@
         "同じEC2/EBS/公開IPとHTTPS正常、旧CD休止を再確認。"
       ],
       "why": "最新バックアップを確保した後も、停止/サイズ変更/起動を勝手に続けず、確認できた範囲を明確にするため。",
-      "proof": "新snap-<SNAPSHOT_ID>は11月16日作成/完了をユーザー確認。20:32 JSTに同じEC2/EBS/公開IP、旧CD休止、旧版HTTPS正常をSSH確認。旧snapshotも保持。",
+      "proof": "新snap-\u003cSNAPSHOT_ID>は11月16日作成/完了をユーザー確認。20:32 JSTに同じEC2/EBS/公開IP、旧CD休止、旧版HTTPS正常をSSH確認。旧snapshotも保持。",
       "limit": "新snapshotの作成時刻や共有/暗号化等の最終照合、実復元試験、EC2停止・サイズ変更・起動は未実施。停止/変更/起動は1操作ずつ承認。",
       "topic": "aws-reuse-plan",
       "files": [
@@ -6169,7 +6740,7 @@
       "ログイン状態を扱う記録。有効期限などを持つ。"
     ]
   ],
-  "sourceRoot": "<LOCAL_PATH>",
+  "sourceRoot": "\u003cLOCAL_PATH>",
   "sourceReviewDate": "2026-11-15",
   "codeVocabulary": [
     [
@@ -6319,6 +6890,24 @@
   }
   function note(text){return '<p class="diagram-note">'+text+'</p>';}
   function diagram(kind,state){
+    if(kind==="portfolio-landing-demo-v1") return flow([["/","サービス紹介・DBアクセスなし","good"],["/demo","メモリ上の一部機能デモ","good"],["/workspace","既存アカウントで統合版","good"]])+note("スクリーンショットは架空データのローカル検証画像。現在の公開サイトが稼働中かどうかは確認していません。");
+    if(kind==="workspace-dirty-v1") return flow([["サーバー値","編集開始の基準","good"],["React入力","差があればdirty","good"],["共通Hook","移動・離脱を保護","good"],["保存確認","成功後に解除","good"]]);
+    if(kind==="workspace-http-v1") return flow([["書き込み","自動再送しない","good"],["15秒・通信断","DB取消ではない","good"],["結果不明","入力と再送制限","good"],["GETで確認","曖昧なら不明を維持","good"]]);
+    if(kind==="workspace-async-v1") return flow([["入力と版","自動更新で変えない","good"],["refで連打防止","通信を一回にする","good"],["409なら比較","最新版と入力を分離","good"],["古い応答","世代確認で破棄","good"]]);
+    if(kind==="workspace-leaving-v1") return flow([["通常の移動","破棄/残るを確認","good"],["再読み込み","beforeunloadは制約あり","good"],["認証・所属失効","下書きも破棄","good"],["別アカウント","情報を渡さない","good"]]);
+    if(kind==="team-access-roles-v1") return flow([["Better Auth","Cookieから本人を確認","good"],["現在の所属","チームとadmin/memberを確認","good"],["業務ルール","管理者と進行役を区別","good"],["APIで拒否","自己申告の権限は使わない","good"]]);
+    if(kind==="team-invitations-v1") return flow([["招待を保存","宛先・期限7日・発行者","good"],["本人専用一覧","既存の認証済みアカウント","good"],["承認時に再検査","期限・状態・宛先・発行者","good"],["所属＋使用済み化","一括保存・再利用拒否","good"]]);
+    if(kind==="team-membership-history-v1") return flow([["全業務を検査","担当・進行役が残れば拒否","good"],["所属だけを解除","他チームとセッションは残す","good"],["人物・履歴を保持","終了済み会議を書き換えない","good"],["再参加","人物は再利用・権限はmember","good"]]);
+    if(kind==="team-management-locks-v1") return flow([["所属行をロック","userId順に取得","good"],["Team行をロック","最新の版・管理者数を検査","good"],["変更を一括保存","所属＋招待＋版","good"],["失敗なら全取消","409では入力を保持","good"]]);
+    if(kind==="meeting-decisions-handover"){
+      return flow([["Reactの下書き","10秒更新でも上書きしない","good"],["Next.js API","認証・所属・進行役・版を検査","good"],["Prismaのtransaction","本体＋会議snapshot＋版を一緒に保存","good"],["MySQLの過去記録","終了後は閲覧専用・選択して引き継ぐ","good"]])+note("外部キーは関係の整合性、一意制約は二重登録、版番号は古い入力からの上書きを防ぎます。それぞれ役割が違います。");
+    }
+    if(kind==="local-mysql-rsa"){
+      return flow([["信頼済みDocker","MySQLの公開鍵だけを確認","good"],["公開鍵＋指紋を保存","秘密鍵はサーバー外へ出さない","good"],["接続前に照合","不一致・未設定なら拒否","good"],["専用MySQLで検証","123件成功・既存データ保持","good"]])+note("公開鍵の自動取得は無効。RSAの認証保護と、通信全体のTLS暗号化は別です。本番接続設定は変更しません。");
+    }
+    if(kind==="project-search"){
+      return flow([["Reactの入力","入力途中と適用済みを分ける","good"],["URLとNext.js API","条件を復元・所属を再確認","good"],["PrismaのAND / OR","認可・検索・カーソルを組み合わせる","good"],["MySQL → 画面","件数と1ページを取得","good"]])+note("条件変更で先頭へ戻り、前の通信を中断。実MySQL・実API・Chromeの通し15項目を確認済み。過去の模擬14項目とは別。本番・大量データ性能は未検証です。");
+    }
     if(kind==="poll-incident-m5"){
       return flow([["incident v2を保存","日時も含む全体チェックサム","good"],["IDで通知を集約","日時だけで別の事故にしない","good"],["人が復旧先を照合","故障stableと正常rollbackを区別","good"],["別承認・再開前確認","通知成功でもincidentを維持","good"]])+note("ローカルモデルです。チェックサムは署名ではありません。実通知・実復旧は行わず、STOP中の起動、3002への復帰、DB巻き戻しも行いません。");
     }

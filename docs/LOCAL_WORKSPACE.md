@@ -1,3 +1,38 @@
+## 検索機能の手動確認（2026-11-24）
+
+実MySQL・実Next.js API・Chromeの通し試験15項目が成功した。API応答を差し替えず、実ログイン/検索/複合条件/25件の追加読み込み/URL復元/チーム切替/案件編集/会議確認・取消・終了/ログアウトを確認。既存データは保持し、一時25案件・候補25人は回収した。手動確認時の件数・候補は既存データの値になる。
+
+以下はリポジトリルートのPowerShellで実行する。Docker Desktopと既存MySQLが起動済みなら、最初の起動コマンドは不要。
+
+```powershell
+docker --context desktop-linux compose --env-file .env.mysql.local -f compose.dev.yaml start mysql
+```
+
+これはcontextでPC内Docker、env-fileで既存設定、fで既存Composeを選び、start mysqlで既存コンテナだけを起動する。ボリューム/DBを初期化しない。既存コンテナがなければ作り直さず停止する。今回MySQLは起動状態を維持した。
+
+```powershell
+$env:SITEFLOW_WORKSPACE_MODE = 'integrated'
+$env:SITEFLOW_INTEGRATED_ORIGIN = 'http://127.0.0.1:5187'
+$env:NEXT_TELEMETRY_DISABLED = '1'
+node node_modules/next/dist/bin/next dev --hostname 127.0.0.1 --port 5187
+```
+
+envの3行は、このPowerShellだけで統合APIモード、許可Origin、Next.jsテレメトリー無効を指定する。環境ファイルは編集しない。nodeの引数は導入済みNext.js本体、devは開発サーバー、hostnameはPC内限定、portは待受番号。`.next`等の開発生成物は更新されるが、起動だけではDB初期化/migrationを行わない。この方式は別の5175番APIを必要としない。終了は同じターミナルでCtrl+C。今回の一時Next.jsは試験後に停止した。
+
+URLは`http://127.0.0.1:5187/workspace`。既存の`.env.workspace.local`のメール/パスワードを手元で確認して入力する。既存アカウントの専用DB・メール・保存済みパスワードとの一致は読み取り検証済みで、値は記録しない。検索→詳細条件→追加読み込み→リセット→戻る/進む→チーム切替を試す。操作は検証DBの実データへ保存されるため、架空の確認用案件を使う。本番URLではない。
+
+## ローカルMySQLのRSA公開鍵固定（2026-11-24）
+
+MySQL 8.4.13の`caching_sha2_password`とMariaDBドライバー3.5.4を維持する。Docker停止によるECONNREFUSEDの解消後、完全認証で公開鍵が必要になり45028が発生したため、検証専用接続に固定公開鍵を指定した。再起動で認証キャッシュが消えた可能性はあるが、過去のキャッシュは未確認。
+
+- 公開鍵は確認済みPC内Docker Engineと既存コンテナ・ボリュームを照合してから、MySQLの`/var/lib/mysql/public_key.pem`だけを取得した。サーバーのRSA秘密鍵は読まない。元ファイル末尾のNULは、Node.js cryptoで公開鍵として解析して標準SPKI PEMへ書き出すことで正規化した。
+- Git除外の`work/local-mysql-rsa-public.pem`へ公開鍵を保存し、同じくGit除外の`.env.schema-check.local`へ`SCHEMA_CHECK_RSA_SHA256`（SPKI DERのSHA-256）を追加した。既存DB名・ユーザー・パスワード・ポートは変更しない。別PCでは本人確認なしに値をコピーせず、そのPCの信頼済みDocker経由で改めて登録する。
+- `readSchemaCheckConnectionOptions()`が本番/別DBを拒否する従来設定検査を通し、公開鍵の形式・RSA 2048bit以上・指紋一致を確認してから、`cachingRsaPublicKey`と`allowPublicKeyRetrieval:false`を渡す。ファイル不足・symlink・不一致なら接続前に停止する。サーバーから接続時に新しい鍵を自動採用しない。
+
+分離APIとローカル統合APIはこの共通設定を使う。本番の`publicDatabaseOptions`・TLS検証・認証方式・権限は変更しない。RSAは完全認証時にパスワードを保護する仕組みで、SQL通信全体をTLS化する設定ではない。この接続は従来どおりPC内127.0.0.1の検証用に限定する。
+
+既存の起動手順は下記のまま。固定鍵が未設定・不一致なら、既存Docker/コンテナ/鍵の変更有無を読み取り確認し、本人承認のうえ公開鍵と指紋を再登録する。無条件取得、TLS検証無効化、DB再初期化で回避しない。現在の鍵による認証、検索6件・認証/案件102件・会議15件、公開鍵検証9件が成功。実際のEC2・本番接続やコンテナ再起動の試験ではない。
+
 ## 最新：Next.jsへのローカルAPI統合（2026-11-15）
 
 integratedを明示した開発モードで別APIなしの動作を確認。手順と現在地は [NEXTJS_API_INTEGRATION.md](NEXTJS_API_INTEGRATION.md)。通常の中継モードは維持している。保管/復元はチーム管理者または主担当のみ、副担当だけでは不可。本番・AWSは未変更。以下の記録は当時の構成として読む。
@@ -185,3 +220,91 @@ Route HandlerのRequest/Responseと非同期paramsは使用中のNext.js 16.3.4�
 - 本体/検証APIの型検査、ESLint、ビルドも確認し、最終結果は`VERIFICATION.md`に記録する。旧API/DB96件は前段階の結果で、今回一括再実行していない。
 
 公開環境、ユーザー登録/招待メール、全ブラウザー・スクリーンリーダー・全キーボード操作、負荷・性能は未検証。次は全体の通し確認とポートフォリオとしての仕上げを行う。学習の図解は一つの`LEARNING_GUIDE.html`に追記する。
+
+## 会議の相談・決定・引き継ぎを自分で確認する（2026-11-25）
+
+新しい3テーブルは専用ローカル検証DBへ適用済み。`.env.workspace.local`の手動用アカウントが同じDBを使うことも照合した。既存の開発DBや本番へは適用していない。既存のMySQLと固定RSA公開鍵をそのまま使い、ここではmigration・DB初期化・データ再投入を行わない。
+
+起動済みの古いNext.jsはハンドラーをメモリに保持する場合がある。会議記録APIが404なら、古いサーバーを使い続けず、下記の新規プロセスで確認する。既存5187番のサーバーは今回停止していない。5191番が使用中の場合は二重起動せず、その用途を確認する。
+
+リポジトリルートのPowerShellで、次の順に実行する。
+
+```powershell
+$env:SITEFLOW_WORKSPACE_MODE='integrated'
+$env:SITEFLOW_INTEGRATED_ORIGIN='http://127.0.0.1:5191'
+$env:SITEFLOW_LOCAL_CHECK='1'
+$env:NEXT_TELEMETRY_DISABLED='1'
+node node_modules/next/dist/bin/next dev --port 5191 --hostname 127.0.0.1
+```
+
+- `$env:`はこのターミナルから起動するプロセスだけの環境変数。設定ファイルや本番設定は変更しない。
+- `SITEFLOW_WORKSPACE_MODE`の`integrated`はNext.js内の実APIと専用MySQLを使う指定。`SITEFLOW_INTEGRATED_ORIGIN`は許可するローカル接続元で、ポートも一致させる。
+- `SITEFLOW_LOCAL_CHECK=1`は既存next.config.tsの検証専用キャッシュと型設定を使う。通常開発サーバーのキャッシュを共有しない。新しい本番モードではない。
+- `NEXT_TELEMETRY_DISABLED=1`はNext.jsのテレメトリーを無効化する。
+- `node`は既に導入済みのNext.js CLIを実行する。`dev`は開発用、`--port 5191`は待受ポート、`--hostname 127.0.0.1`はこのPCだけから接続する指定。公開やDB変更は行わない。終了時はこのターミナルでCtrl+C。
+- `Ready`が出たら`http://127.0.0.1:5191/workspace`をChromeで開く。既存の`.env.workspace.local`を手元で開き、そのメールとパスワードでログインする。内容をチャットや画像へ転記しない。別プロセスなので以前のCookieでは再ログインが必要な場合がある。
+
+案件のあるチーム→「会議」→新しい会議を開始→案件を選択→相談・決定を保存→担当者を選んで対応事項を保存する。会議を終了して次の会議を開始し、「引き継ぎ候補を確認」から選択する。引き継ぎ元リンクと終了した会議の閲覧専用表示を確認する。
+
+これは専用検証DBへの手動入力になる。既存の案件や会議を消さず、架空で識別できる内容を使う。未保存時は保存か破棄を先に行う。競合時は入力が残るので最新内容と比較する。対応済み・取消は古い記録から未対応へ戻さない。
+
+実Chromeの画像：[PC](../work/meeting-records-real/meeting-1440.png)・[スマホ](../work/meeting-records-real/meeting-390.png)。`work/`はGit対象外なので別PCには存在しない。試験用ユーザー・会議は回収済みで、画像のデータはログイン後の手動アカウントへ残していない。
+
+## チーム作成・所属管理を後日まとめて確認する（2026-11-25）
+
+今回の自動検証では会議の手動確認を行っていない。既存MySQLとRSA公開鍵固定設定をそのまま使用し、Team.versionの追加migrationを同じ専用検証DBへ適用済み。別DBへの適用や再初期化は行わない。
+
+前節の起動方法と同様、リポジトリルートのPowerShellで次を実行する。検証専用キャッシュを使う5191番などが動いていれば、その用途を確認し、同じ検証サーバーのターミナルで終了してから起動する。MySQLや別の通常開発サーバーを終了する手順ではない。
+
+```powershell
+$env:SITEFLOW_WORKSPACE_MODE='integrated'
+$env:SITEFLOW_INTEGRATED_ORIGIN='http://127.0.0.1:5192'
+$env:SITEFLOW_LOCAL_CHECK='1'
+$env:NEXT_TELEMETRY_DISABLED='1'
+node node_modules/next/dist/bin/next dev --port 5192 --hostname 127.0.0.1
+```
+
+`$env:`はこのターミナルから起動するプロセスへの設定。integratedはNext.js内の実API、INTEGRATED_ORIGINは許可する接続元、LOCAL_CHECK=1は既存の検証用キャッシュ/型設定、TELEMETRY_DISABLED=1はテレメトリー停止。nodeは導入済みNext.js CLI、devは開発用、--portは5192番、--hostnameはPC内だけの127.0.0.1指定。公開・migration・データ投入はしない。Readyが出たらhttp://127.0.0.1:5192/workspaceを開き、既存.env.workspace.localの情報でログインする。値をチャット・画像・Gitへ転記しない。終了は起動したターミナルでCtrl+C。
+
+1. 「チームを作成」で架空の名前を入力し、作成先へ移動することを確認する。結果不明時は自動再送せず、所属一覧を確認する。
+2. 「チーム設定」で名前を変更し、メンバーと現在の役割を見る。入力中の移動は止められるので、保存か「入力・確認を破棄」を使う。
+3. 別の既存メール認証済みアカウント宛てに招待を作る。メールは送られず、相手がログインして「自分宛ての招待」から承認/辞退する。期限は7日。自動試験用のアカウントとパスワードは回収済みで、恒久保存していない。2人操作には別の準備済みアカウントが必要で、未準備ならその手動確認は保留する。公開登録やemailVerifiedの手動変更で代用しない。
+4. 管理者は役割変更・所属解除の確認画面を開く。最後の管理者や担当の残る人は解除できない。該当案件/会議で引き継ぎを行ってから再確認する。不在進行役は検出だけで、自動復旧しない。
+5. 自分の退出後は他の所属または所属なし画面へ戻る。他チームの情報とアカウントは消さない。再参加時は一般メンバーになる。
+
+上記は専用検証DBへの手動書き込みになる。既存データを消さず識別できる架空データで確認する。今回の実装・自動検証完了は、この手動操作が済んだことを意味しない。
+
+画像：[PC](../work/team-management-real/team-1440.png)・[スマホ](../work/team-management-real/team-390.png)。結果はwork/team-management-real/results.json。Git除外のため別PCには存在しない。新規登録・招待限定登録・実メール本人確認は公開前の検討課題として維持する。
+
+## 未保存入力・エラー処理を後日確認する（2026-11-25）
+
+上記の過去時点の「入力中は移動できない」説明を補足する。現在は通常移動で、ブラウザー標準の確認に「OK：破棄して移動／キャンセル：画面に残る」を案内する。保存中は移動できない。未変更や元の値へ戻した場合、検索条件の入力だけでは警告しない。相談・決定・チーム名の入力も同じ方針。保存失敗と結果不明は区別し、結果不明の再取得だけでは無条件に再送可能にしない。
+
+手動確認では、前節と同じ環境変数4つを使い、`SITEFLOW_INTEGRATED_ORIGIN`のポートとNext.jsの`--port`を両方5193へ変更する。起動するコマンド全体は、導入済みのNext.js開発サーバーを、このPC内の5193番で、既存の実API・専用検証DBに接続して動かすもの。`node node_modules/next/dist/bin/next dev --port 5193 --hostname 127.0.0.1`の`dev`は開発用、`--port`は待受番号、`--hostname`はPC内限定。環境変数の意味は前節と同じで、DB作成・migration・本番接続はない。検証キャッシュを使う他のNext.jsを同時起動しない。
+
+Ready後は http://127.0.0.1:5193/workspace を開き、既存の`.env.workspace.local`を手元で確認してログインする。試験用ユーザーは回収済みなので、画像中のアカウントは使わない。
+
+1. 案件登録で名前を入力し、「入力を破棄して一覧へ戻る」を押す。キャンセルで入力とフォーカスが残ること、OKで移動することを確認する。
+2. 元の値へ戻して移動し、不要な警告が出ないことを確認する。編集の副担当は順序だけの違いを変更扱いにしない。
+3. 未保存のままチーム切替、画面切替、戻る、再読み込み、ログアウトを試す。通常の操作は確認で残れるが、セッション・所属失効時は下書きも破棄する。
+4. 会議の相談を入力し、10秒以上待っても内容が消えないこと、終了前に未保存の確認があることを確認する。
+5. 409では最新版を取得しても入力は変わらない。明示的に比較してから保存する。保存後に表示取得だけ失敗した場合は「保存済み」として再取得し、再保存しない。
+
+通信障害は自動試験で再現済み。通常の手動確認で本番・DB・ネットワーク設定を壊して再現しない。タイムアウト15秒やAbortControllerによる待機中断はMySQLの保存取消ではない。保存結果不明なら対象一覧・記録・所属を確認し、曖昧なまま再登録しない。新規登録の同名一覧だけでは成否を断定できないため、管理者にも確認する。ログアウトの成否とセッション取得が両方不明なら、業務画面を非表示にして不明と案内する。
+
+beforeunloadの表示には利用者の操作履歴などの制限があり、OS強制終了・端末故障・一部スマートフォン操作では警告できない。業務下書きはlocalStorage/sessionStorageへ保存しない。完全な入力復元や複数タブをまたぐ重複登録の防止は保証しない。自動保存・オフライン編集・全APIの冪等性キーは今回対象外。
+
+画像：[PC](../work/reliability-browser/reliability-1440.png)・[スマホ](../work/reliability-browser/reliability-390.png)。自動検証結果は`work/reliability-browser/results.json`。`work/`はGit対象外。利用者による手動確認は未実施のまま保持する。
+
+## 隔離Chrome CDPと専用DBの確認（2026-11-26）
+
+Chromeの独立したローカル検証では、普段使うChromeプロファイルを使わず、OSの一時ディレクトリに専用プロファイルを作る。Chromeには`--headless=new`（画面を表示しない）、`--no-first-run`と`--no-default-browser-check`（初回案内を抑止）、`--disable-background-networking`と`--disable-component-update`（検証と無関係な通信・更新を抑止）、`--disable-extensions`（拡張機能を読み込まない）、`--remote-debugging-address=127.0.0.1`（CDPをPC内だけに公開）、`--remote-debugging-port=0`（空きポートを自動選択）、`--user-data-dir=<一時プロファイル>`（通常プロファイルから分離）を指定する。`about:blank`で起動し、一時プロファイルの`DevToolsActivePort`から選ばれたポートを読み、`http://127.0.0.1:<port>/json`でpage targetを特定して、そのページのWebSocketへ接続する。`Page.enable`、ページ移動、撮影が成功したことを過去の独立試験で確認した。これはComputer Useの安全停止を迂回する方法ではなく、無害なローカルページに対する独立したCDP動作確認に限る。
+
+試験終了時はWebSocketを閉じ、自分が起動したChromeプロセスだけを終了し、一時プロファイルを削除する。既存Chromeを名前やPIDだけで終了しない。CDPページ操作が失敗した過去の原因は確定していないため、再現したと決めつけない。
+
+統合画面の接続先確認では、既存の`readSchemaCheckConnectionOptions()`と専用設定を使い、秘密値を表示せずに`SELECT DATABASE(), CURRENT_USER()`を実行する。返ったDB名・接続ユーザーが専用検証設定と一致し、開発DB設定とは別であることを確認した後、接続を閉じる。2026-11-26の確認結果はMATCHで、書き込み・migrationは行っていない。RSA公開鍵固定や接続設定を変更して再試行しない。
+# トップページ・体験導線（2026-11-26）
+
+- `/` はサービス紹介、`/demo` は再読み込みで初期化されるブラウザー内デモ、`/workspace` は既存アカウントを使う統合版です。
+- デモから業務DB・認証APIへ接続しません。会議・検索・チーム管理を含む統合版全体のデモではありません。
+- ローカルの紹介ページと画像は確認済みですが、外部公開サイトの現在の稼働状態は未確認です。公開準備を再開するときに、実際のURL・稼働・掲載内容を確認してください。

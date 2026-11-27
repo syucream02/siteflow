@@ -2,12 +2,14 @@
 
 > 公開用資料：環境固有の識別子・個人PCパスは匿名化。仮値のコマンドはそのまま実行しないでください。公開は手動で、自動デプロイは未導入です。後段のCD関連は過去の設計・ローカル検証を含み、GitHub未反映の資料・コードがあります。
 
+> REQUIRES_APPROVED_* は公開用の未設定値です。実運用値として適用せず、対象環境とバックアップ・復旧手順を別途確認してください。運用原本はリポジトリ外のアクセス制限された保管先へ退避しています。
+
 > 最新（2026-11-21 11:58 JST）：**Next.js初回公開と認証・テスト案件の公開HTTPS試験に成功し、公開先は3001。** 検証枠のUIDを所有者1000へ合わせ、mode600・特権削除・秘密保護を維持した。旧Vinext3002は復旧用に稼働継続。実測と残課題は [手動公開記録](MANUAL_PUBLIC_RELEASE.md) を参照。後段の失敗・未公開は履歴として保持。
 
 最新（2026-11-17 21:21 JST）：**PC実Chromeの非公開HTTPSでログイン・案件保存35％・再読み込み・ログアウトに成功**。証明書dry-run/再読込hook/通常renew正常（実証明書の期限延長なし、11月21日15:26 JST）。候補だけの停止再開と保存保持も成功、旧Vinext/Nginxルーティング維持・HTTPS200。S3/IAMは承認待ち、GitHub production未作成、CD/公開経路変更はローカル準備のみ。詳細は[21節](PREDEPLOY_VALIDATION.md#21-公開前準備証明書非公開ブラウザー復旧cd)。後段は過去の履歴を含む。
 
 
-最新（2026-11-17 20:08〜20:10 JST）：**AWS Next.js候補版が127.0.0.1:3001で稼働**。新正式DBへ確認済み2履歴を適用、runtimeは業務tableのCRUDのみ、migrationユーザーはロック。実HTTPでログイン/案件作成保存再取得/ログアウトと401を確認。Next約181〜188MiB/384MiB、MySQL約231MiB/512MiB、EC2 available最少約826MiB。旧公開HTTPS200・不変。S3/一般公開切替/Git push/再起動は未実施。詳細は[20節](PREDEPLOY_VALIDATION.md#20-aws-nextjs候補版の起動正式db移行ログイン保存検証)。後段の未起動/提案は過去の履歴。
+最新（2026-11-17 20:08〜20:10 JST）：**AWS Next.js候補版がREQUIRES_APPROVED_PUBLIC_IPV4:3001で稼働**。新正式DBへ確認済み2履歴を適用、runtimeは業務tableのCRUDのみ、migrationユーザーはロック。実HTTPでログイン/案件作成保存再取得/ログアウトと401を確認。Next約181〜188MiB/384MiB、MySQL約231MiB/512MiB、EC2 available最少約826MiB。旧公開HTTPS200・不変。S3/一般公開切替/Git push/再起動は未実施。詳細は[20節](PREDEPLOY_VALIDATION.md#20-aws-nextjs候補版の起動正式db移行ログイン保存検証)。後段の未起動/提案は過去の履歴。
 
 
 最新（2026-11-17 19:40 JST（10:40 UTC））：AWS上の架空DB backup→別空DB restoreの定義/全行/整合性一致、アプリ用最小CRUD・TLS必須・他DB/DDL拒否、Next.jsと同じ接続設定/Prisma adapterで正常TLSと不正CA/誤名/平文拒否を確認。MySQL約205MiB/512MiB、host最少約891MiB、旧公開HTTPS200。**実Next HTTP候補/Prisma migration/EC2外backupは未実施。** 詳細・残作業・S3承認案は[検証19節](PREDEPLOY_VALIDATION.md#19-awsでの検証dbバックアップ復元アプリ用tls接続)。後段は過去時点の記録を含む。
@@ -101,7 +103,7 @@ EC2停止・サイズ変更・停止再開テスト・最終休止は、この�
 
 ### コンテナと保存先
 
-- Next.jsは`NODE_ENV=production`、`SITEFLOW_WORKSPACE_MODE=public-integrated`、内部3000番。ホスト側は既存3001/3002番の枠を維持し、127.0.0.1だけに公開する。
+- Next.jsは`NODE_ENV=production`、`SITEFLOW_WORKSPACE_MODE=public-integrated`、内部3000番。ホスト側は既存3001/3002番の枠を維持し、REQUIRES_APPROVED_PUBLIC_IPV4だけに公開する。
 - 現在は旧Vinextが3002番を使うという過去記録がある。後続の実機確認で一致した場合、初回Next.js候補は3001番。両方使用中なら中止し、既存コンテナを削除して空けない。
 - MySQLは8.4系の検証済みdigestを固定する。共有Dockerネットワークでのみ接続し、本番の3306番はホストへ公開しない。DBのDNS aliasは証明書のSAN（接続先名の一覧）と一致させる。
 - ボリューム名は例として`siteflow-production-mysql`を固定し、存在確認と所有確認を必須とする。初回作成・既存再利用を別モードにし、再開時に見つからなければ失敗させる。空ボリュームを自動作成して復旧成功としない。
@@ -261,14 +263,14 @@ AWS/GitHub設定変更・push・本番切替・サイズ変更・停止再開は
 
 | 対象 | 今回の確認結果 | 判断・残る条件 |
 | --- | --- | --- |
-| 稼働先 | シドニー、t3.micro、公開IPv4 `13.237.188.172`。登録済みSSHホスト鍵で照合成功 | 別の過去接続先はホスト鍵不一致で接続中止。known_hostsの削除/書換えなし |
+| 稼働先 | シドニー、t3.micro、公開IPv4 `REQUIRES_APPROVED_PUBLIC_IP`。登録済みSSHホスト鍵で照合成功 | 別の過去接続先はホスト鍵不一致で接続中止。known_hostsの削除/書換えなし |
 | RAM・swap | RAM総量913MiB、利用可能314MiB。swap総量2047MiB、使用46MiB | 一時点の測定。1GBのまま新旧Next.js＋MySQLを載せない。2GB案も未承認・未測定 |
 | ディスク | EBSルート20GB、XFS、空き7.2GB、使用65％。Docker保存先 `/var/lib/docker` は同じ領域 | 25％空きを残すなら追加に使える量は概算2GB程度。DB・バックアップ・展開時の一時領域まで含めた余裕は未証明 |
 | Docker保存量 | イメージ6個/論理6.203GB、コンテナ7個（稼働1）、ローカルvolume 0、build cache約2MB | imageの論理サイズは共有層があり単純加算不可。停止済み旧版を一括pruneしない |
 | 旧公開版 | `siteflow-3002`、main SHA `ae3e31a78da037d0f855e9143ea5cce5e0a6cfe3`、132.9MiB/上限192MiB | mountなし、restartはunless-stopped、3002→3000をloopbackだけで公開。現在のローカルMySQLはAWSに存在しない |
 | 空いている枠 | 3001番は未listen、3002番だけ旧版が使用 | 初回Next.js候補は3001。最終直前にも再確認する |
-| Nginx | `/etc/nginx/conf.d/siteflow.conf`、HTTPSから `127.0.0.1:3002` へ転送 | 公開Host/転送ヘッダーあり。新方式用include/slotヘッダーはまだない |
-| HTTPS | `https://13.237.188.172/` は200、TLS検証結果0（成功）。IPをSANに含むLet's Encrypt証明書 | 現在有効であることと2027年の再公開成功は別 |
+| Nginx | `/etc/nginx/conf.d/siteflow.conf`、HTTPSから `REQUIRES_APPROVED_PUBLIC_IPV4:3002` へ転送 | 公開Host/転送ヘッダーあり。新方式用include/slotヘッダーはまだない |
+| HTTPS | `https://REQUIRES_APPROVED_PUBLIC_IP/` は200、TLS検証結果0（成功）。IPをSANに含むLet's Encrypt証明書 | 現在有効であることと2027年の再公開成功は別 |
 | 証明書期限 | 2026-11-21 06:26:22 UTC＝11月21日15:26:22 JST | 短期証明書。更新実行・dry-runは今回していない |
 | 証明書更新 | Certbot 5.8.0。webroot `/var/www/letsencrypt`、shortlived。03/15時UTC＋最大30分の乱数遅延、Persistent=true | enabled/待機中、直前service終了0。更新時hookは `systemctl reload nginx`。期限を実際に延長できることは今回未検証 |
 | 自動配信 | `siteflow-cd.timer` enabled/active。起動1分後、前回service終了から5分＋精度10秒 | PC再起動と無関係。サーバー再起動後にも動くため、timerを一時stopするだけでは長期休止対策にならない |
@@ -312,7 +314,7 @@ root実行案は新CDがDocker/Nginxを操作するための候補であり、EC
 
 - container：`siteflow-3002`、port：3002、管理ラベル：`siteflow-cd`。
 - SHA：`ae3e31a78da037d0f855e9143ea5cce5e0a6cfe3`。
-- image：`ghcr.io/syucream02/siteflow@sha256:46305b1d7ab09f8a7ce1002d2b82dd75d934545b5d45288f805ea646cba741fd`（実機RepoDigestsで照合）。
+- image：`ghcr.io/syucream02/siteflow@sha256:REQUIRES_APPROVED_CERTIFICATE_FINGERPRINT`（実機RepoDigestsで照合）。
 - root管理のNginxバックアップと新方式の初期current/previous記録を整えてから切り替える。旧版はメモリデモなので新MySQLの案件/会議は表示できない。旧版へ戻しても新DBを削除/巻き戻さない。旧CDを再開して戻す方法は採用しない。
 
 ### 費用と未確認の扱い
@@ -327,7 +329,7 @@ root実行案は新CDがDocker/Nginxを操作するための候補であり、EC
 
 ### 確認済みの前提
 
-2026年11月16日、ユーザーがAWSコンソールで `13.237.188.172` がElastic IPで、`i-<INSTANCE_ID>` に関連付けられていることを確認したと申告。これを現在の計画の前提とする。エージェントによるDescribeAddresses再取得ではなく、参照権限不足は変更していない。Elastic IPの解放・関連付け解除をせず維持する。停止/サイズ変更の承認はまだ得ていない。
+2026年11月16日、ユーザーがAWSコンソールで `REQUIRES_APPROVED_PUBLIC_IP` がElastic IPで、`i-<INSTANCE_ID>` に関連付けられていることを確認したと申告。これを現在の計画の前提とする。エージェントによるDescribeAddresses再取得ではなく、参照権限不足は変更していない。Elastic IPの解放・関連付け解除をせず維持する。停止/サイズ変更の承認はまだ得ていない。
 
 12:41:35 JST（03:41:35 UTC）のSSH再参照結果：timerはenabled/active/waiting、serviceはinactive/dead/MainPID=0/Result=success。lslocksに対象のdeploy.lockは表示なし。公開コンテナは従来のsiteflow-3002/同じSHAで、HTTPS200・TLS検証成功。瞬間の状態なので実行直前に再確認する。
 
@@ -402,7 +404,7 @@ sha256sumで現物を読み取り照合。識別値は秘密値ではなく、�
 | --- | --- |
 | 対象 | シドニー `i-<INSTANCE_ID>`、現在t3.micro/1GB → t3.small/2GB |
 | 目的 | MySQL512MiB＋Next.js各384MiB＋OS等の余裕を検証できる容量にする。2GBで本番合格したという意味ではない |
-| 維持 | 同じEBS/既存ファイル、Elastic IP `13.237.188.172`、VinextイメージとNginx、旧CDのdisabled状態 |
+| 維持 | 同じEBS/既存ファイル、Elastic IP `REQUIRES_APPROVED_PUBLIC_IP`、VinextイメージとNginx、旧CDのdisabled状態 |
 | 必要な操作 | ①EC2一時停止、②停止中のインスタンスタイプ変更、③同じEC2の起動。各操作を実行前に明示して承認を得る |
 | 公開への影響 | 停止から起動/正常性確認までHTTPSにアクセスできない。所要時間は状況によるため保証しない。更新作業の間だけの停止で、長期休止の承認ではない |
 | 含めない操作 | EBS変更/削除/スナップショット、新規EC2、IP変更、IAM変更、Compose導入、GitHub設定/push、Next.jsへの本番切替 |
@@ -530,7 +532,7 @@ EC2内の既存権限では作成/参照ができるとは確認できていな�
 | 旧snapshot | `snap-<SNAPSHOT_ID>` はユーザー確認で保持。削除しない |
 | その他 | Snapshot側のVolumeSize/共有設定/保存層/暗号化の値は今回の報告に含まれず独立確認なし。承認案は標準/非公開/元EBSに合わせ非暗号化 |
 
-20:32:37 JST（11:32:37 UTC）のSSH参照：対象インスタンスID/typeは同じt3.micro、public-ipv4は13.237.188.172、実ルートvolume識別は同じ、容量20GiB/空き7.2GB。旧siteflow-3002は同じimageでrunning/unless-stopped、Nginx設定SHA256不変、nginx/dockerはactive/enabled。旧CDはtimer inactive/disabled、service inactive、配信ロックなし。HTTPS200/TLS検証結果0。
+20:32:37 JST（11:32:37 UTC）のSSH参照：対象インスタンスID/typeは同じt3.micro、public-ipv4はREQUIRES_APPROVED_PUBLIC_IP、実ルートvolume識別は同じ、容量20GiB/空き7.2GB。旧siteflow-3002は同じimageでrunning/unless-stopped、Nginx設定SHA256不変、nginx/dockerはactive/enabled。旧CDはtimer inactive/disabled、service inactive、配信ロックなし。HTTPS200/TLS検証結果0。
 
 Elastic IPの関連付けは前段のユーザー確認を引き継ぎ、今回のmetadata照合は同じEC2から同じ公開IPが見えることを確認したもの。DescribeAddressesが成功したとは扱わない。停止・起動の前後にもコンソールのElastic IP関連付けを確認する。
 
@@ -567,8 +569,8 @@ stoppedになったらHTTPSが応答しなくなるのは予定された公開�
 | 対象/タイプ | `i-<INSTANCE_ID>` / `t3.small`。IMDSv2とSSHで確認 |
 | RAM | 総量1909MiB、利用可能1484MiB、swap2047MiB/使用0。変更前RAM総量913MiB |
 | root EBS | 同じ `vol-<VOLUME_ID>`、XFS、20GiB/空き7.2GB/使用65％。容量は増えていない |
-| 公開IP | 同じ13.237.188.172。Elastic IPであることは前段のユーザー確認を根拠とし、今回metadataは同じEC2の公開IPを確認 |
-| 旧アプリ | siteflow-3002が稼働、同じSHAとimage ID、127.0.0.1:3002→3000、restart unless-stopped、mountなし |
+| 公開IP | 同じREQUIRES_APPROVED_PUBLIC_IP。Elastic IPであることは前段のユーザー確認を根拠とし、今回metadataは同じEC2の公開IPを確認 |
+| 旧アプリ | siteflow-3002が稼働、同じSHAとimage ID、REQUIRES_APPROVED_PUBLIC_IPV4:3002→3000、restart unless-stopped、mountなし |
 | アプリ使用量 | 約54.63MiB/既存上限192MiB。一時点でありピーク/負荷測定ではない |
 | Docker/Nginx | active/running/enabled。起動タイムスタンプは11:55:39 UTC＝20:55:39 JST。検証時のuptimeは約9分 |
 | Nginx設定 | 以前のSHA256と一致、proxy_passは3002のまま。設定編集/reloadなし |
@@ -773,11 +775,11 @@ CA保管場所はPCのwork/private-mysql-ca-84a0c73f07c0。CA秘密鍵は暗号�
 
 ## 36. Next.js非公開候補の現在地と復旧
 
-2026-11-17 20:08 JST、ユーザー承認内でsiteflow-next-candidateをEC2内127.0.0.1:3001へ起動。正式DBはsiteflow_public_app。image/SQL/移行証拠・非秘密runtime・架空アカウントの保管場所は[20節](PREDEPLOY_VALIDATION.md#20-aws-nextjs候補版の起動正式db移行ログイン保存検証)。アカウントの実値はログ/会話へ表示しない。
+2026-11-17 20:08 JST、ユーザー承認内でsiteflow-next-candidateをEC2内REQUIRES_APPROVED_PUBLIC_IPV4:3001へ起動。正式DBはsiteflow_public_app。image/SQL/移行証拠・非秘密runtime・架空アカウントの保管場所は[20節](PREDEPLOY_VALIDATION.md#20-aws-nextjs候補版の起動正式db移行ログイン保存検証)。アカウントの実値はログ/会話へ表示しない。
 
 旧公開は3002/Nginx/HTTPSのまま。候補異常時は候補だけ正常停止しDBを保持、guard照合後に既存containerの再開を検討する。正式DB/ユーザーを再作成しない。候補のrestart=noとDB unit disabledを理解し、EC2再起動で自動復帰済みと扱わない。公開切替/再起動/boot試験/Git push/恒常配信変更は別承認。
 
-新正式DBのSQL控えは/srv/siteflow-mysql/backups/candidate-20261117T111053Z/siteflow_public_app.sql、暗号化EBS/root0600。当該控えのrestoreとEC2外保存は未検証。復旧は別の空DBへの復元から行い、元DBを上書きしない。証明書notAfterは11月21日15:26 JSTで、今回は更新なし。長期公開前に更新/実ブラウザーHTTPS/backup/保護付き配信を完了する。
+新正式DBのSQL控えは/srv/siteflow-mysql/backups/candidate-20261117T111053Z/REQUIRES_APPROVED_DATABASE_NAME.sql、暗号化EBS/root0600。当該控えのrestoreとEC2外保存は未検証。復旧は別の空DBへの復元から行い、元DBを上書きしない。証明書notAfterは11月21日15:26 JSTで、今回は更新なし。長期公開前に更新/実ブラウザーHTTPS/backup/保護付き配信を完了する。
 
 ## 37. 公開前の証明書・ブラウザー・復旧・CD
 
@@ -790,11 +792,11 @@ EC2のprivate TLS proxyはloopback3443だけ、Next候補3001へ転送する。P
 例示するSSH全体（**現時点では試験後に終了済み。再確認時だけ実行**）：
 
 ~~~powershell
-ssh -i <LOCAL_PATH> -o BatchMode=yes -o StrictHostKeyChecking=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=2 -N -L 127.0.0.1:34439:127.0.0.1:3443 ec2-user@13.237.188.172
+ssh -i <LOCAL_PATH> -o BatchMode=yes -o StrictHostKeyChecking=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=2 -N -L REQUIRES_APPROVED_PUBLIC_IPV4:34439:REQUIRES_APPROVED_PUBLIC_IPV4:3443 ec2-user@REQUIRES_APPROVED_PUBLIC_IP
 ~~~
 
 - -iは本人の既存鍵、BatchModeは対話的な別認証へ移行しない、StrictHostKeyCheckingは登録済みホスト鍵を厳守、ExitOnForwardFailureは転送できなければ終了、ServerAliveは30秒×2回の応答監視。-Nはコマンドを実行せず転送だけ、-Lは両側をloopbackへ限定する。AWS公開設定/hosts/証明書の信頼設定は変更しない。
-- 端末でnode scripts/private-preview-proxy.mjsを起動するとPCの127.0.0.1:31289だけでCONNECT転送を受ける。専用Chromeは--proxy-server=http://127.0.0.1:31289、別の--user-data-dir、--incognitoで起動する。通常profileやOS全体のproxyへ設定しない。新しい所有者限定profileを用意し、他サイトへ秘密を送らない。
+- 端末でnode scripts/private-preview-proxy.mjsを起動するとPCのREQUIRES_APPROVED_PUBLIC_IPV4:31289だけでCONNECT転送を受ける。専用Chromeは--proxy-server=http://REQUIRES_APPROVED_PUBLIC_IPV4:31289、別の--user-data-dir、--incognitoで起動する。通常profileやOS全体のproxyへ設定しない。新しい所有者限定profileを用意し、他サイトへ秘密を送らない。
 - scripts/check-private-preview-browser.mjsはSITEFLOW_BROWSER_CHECK_APPROVED=yesとSITEFLOW_PREVIEW_PROFILEを明示し、新profileで実Chromeを検証する再現用。実行すると架空案件を作るため、単にページを見る操作とは区別する。アカウント実値をログへ表示しない。証明書に問題があれば中止する。
 - 終了時は専用Chrome、該当SSH/nodeのPIDと起動引数を照合して終了し、label/IDで照合した私設TLS proxyだけ停止する。一般のChrome/SSHやDocker全体を止めない。
 
@@ -819,20 +821,20 @@ statusは識別/guardと稼働状態の確認。sudoは限定されたroot操作
 5. 公開切替の別承認後だけ許可/pausedを変更。mainの同一SHA・本人のproduction承認記録・成功job・同run/attemptのartifact・schema/CA/DB証跡を照合する。新Nextは3101/3102へ、旧3002/確認3001に触れない。候補readyと余裕を確認して切替し、連続HTTPS/slot一致を検査。失敗は旧includeへ戻し、DBスキーマ/データを自動で巻き戻さない。
 6. GitHub保護やAPI認証が使えなければ自動配信を無効にし、固定digestとSQL証跡を提示して本人承認の手動切替へ。保護設定を弱めて通さない。休止前はserver側pausedとGitHub許可false、再開時も自動最新main取得を再開しない。
 
-EC2全体/全Dockerの停止再起動、EBS交換/削除、legacy削除はこの手順の許可に含まれない。正式DBの最新SQL控えは/srv/siteflow-mysql/backups/prepublic-20261117T122152Z/siteflow_public_app.sqlで同じEBS内。S3往復/正式DB復元は承認後。21:21時点では旧公開・Next候補・MySQLだけ稼働し、私設TLS proxyとPC側helperは停止済み。
+EC2全体/全Dockerの停止再起動、EBS交換/削除、legacy削除はこの手順の許可に含まれない。正式DBの最新SQL控えは/srv/siteflow-mysql/backups/prepublic-20261117T122152Z/REQUIRES_APPROVED_DATABASE_NAME.sqlで同じEBS内。S3往復/正式DB復元は承認後。21:21時点では旧公開・Next候補・MySQLだけ稼働し、私設TLS proxyとPC側helperは停止済み。
 
 ## 2026-11-18：正式DBのS3保存成功・本人復号待ち
 
 ユーザーがCloudShellでS3/IAM作成と設定読み戻し成功を報告。CodexはEC2ロールの実効List/Put/Getを確認した。EC2ロールに管理設定の読取権限やGetObjectVersionは追加していない。S3/IAM全設定の確認はユーザー実行のCloudShell結果に基づく。
 
-- 保存確認：2026-11-18 19:55 JST（10:55 UTC）。正式DB siteflow_public_app、InnoDBの全16テーブル。ユーザー1、案件2、session0。
-- バケット：siteflow-db-backups-<AWS_ACCOUNT_ID>-ap-southeast-2（ap-southeast-2）。オブジェクト：protected/20261118T105451Z-ca777913/siteflow_public_app.sql.gz.age
+- 保存確認：2026-11-18 19:55 JST（10:55 UTC）。正式DB REQUIRES_APPROVED_DATABASE_NAME、InnoDBの全16テーブル。ユーザー1、案件2、session0。
+- バケット：siteflow-db-backups-<AWS_ACCOUNT_ID>-ap-southeast-2（ap-southeast-2）。オブジェクト：protected/20261118T105451Z-ca777913/REQUIRES_APPROVED_DATABASE_NAME.sql.gz.age
 - VersionId：jdfp5GyziCeQ8GI3j9Ork9GO4ECB4Y0v。暗号文 4289 bytes。SHA-256：ba364bb8846b384c0d9c37be5730ce99ba887a25247283263e8fdd1a1f3da984
 - 目録：protected/20261118T105451Z-ca777913/manifest.json。VersionId：cmEVaTlCUoh18SYhelDfHaPyeX.XWEEv。SHA-256：ffe3ad05cf6bdeec8d9722f0033b166e21f7b8d83c4635ef1caddffd603dd915
 - SSE-S3 AES256。single PUTのIf-None-Match:*で同名上書きを防止。S3から取得したVersionId・サイズ・暗号化方式・SHA256 checksumが一致。目録も再取得して版とハッシュ一致。
 - MySQL専用ユーザー sf_s3_backup：正式DBのSELECT/SHOW VIEWのみ、REQUIRE SSL。接続設定は暗号化EBSのsecrets/s3-backup-client.cnf、root0600。認証値は出力・記録しない。
 - dump --single-transaction --quick --skip-lock-tables --no-tablespaces --set-gtid-purged=OFF --column-statistics=0 --skip-triggers --skip-events --skip-add-drop-table --hex-blob --order-by-primary。16テーブルがInnoDB、trigger/routine/eventなしと確認。整合した読取専用snapshotを使い、復元先を強制するCREATE DATABASE/USEを含めない。DDLが並行実行されないことも運用条件。
-- gzip -nはgzip圧縮時のファイル名・時刻を付けない指定。age --recipients-fileは公開鍵の宛先を読み、復号鍵なしで暗号化する。公式age v1.3.2 Linux archive SHA256 cbe24006683f8eb669266162894b9a522a1af52f2665fbc63a4bb032ed26ac10 と照合。
+- gzip -nはgzip圧縮時のファイル名・時刻を付けない指定。age --recipients-fileは公開鍵の宛先を読み、復号鍵なしで暗号化する。公式age v1.3.2 Linux archive SHA256 cbe24006683f8ebREQUIRES_APPROVED_AWS_ACCOUNT_IDb9a522a1af52f2665fbc63a4bb032ed26ac10 と照合。
 - 一時backupコンテナ：192MiB上限、memory-swapも192MiBでswap禁止、core=0、log-driver=none、read-only、cap-drop ALL。SQL平文ファイルを新規作成せずdump→gzip→ageをパイプ接続した。
 - 全16テーブルの行数・データハッシュ・DDLハッシュが前後で一致。比較用の行データはDBコンテナ内だけでハッシュ化。旧公開/候補/MySQLのID・開始時刻・Nginx設定は不変、旧HTTPS200。
 - 処理中の最低MemAvailableは824307712 bytes（約786MiB）。終了時MySQL243.1MiB、Next146MiB、旧Vinext97.49MiB。暗号化EBS空き約9.63GiB。小さな架空DBの観測であり、将来負荷の保証ではない。
@@ -843,7 +845,7 @@ EC2全体/全Dockerの停止再起動、EBS交換/削除、legacy削除はこの
 CloudShellで以下を実行する（S3読み取りのみ）。--bucketは対象bucket、--keyは保存パス、--version-idは今回の固定版、--expected-bucket-ownerは所有者の取り違え防止、--regionはSydney、--checksum-mode ENABLEDはS3 checksumの取得、最後の引数は暗号文のローカル保存名。
 
 ~~~bash
-aws s3api get-object --bucket siteflow-db-backups-<AWS_ACCOUNT_ID>-ap-southeast-2 --key protected/20261118T105451Z-ca777913/siteflow_public_app.sql.gz.age --version-id jdfp5GyziCeQ8GI3j9Ork9GO4ECB4Y0v --expected-bucket-owner <AWS_ACCOUNT_ID> --region ap-southeast-2 --checksum-mode ENABLED siteflow-db-20261118T105451Z-ca777913.sql.gz.age
+aws s3api get-object --bucket siteflow-db-backups-<AWS_ACCOUNT_ID>-ap-southeast-2 --key protected/20261118T105451Z-ca777913/REQUIRES_APPROVED_DATABASE_NAME.sql.gz.age --version-id REQUIRES_APPROVED_OBJECT_VERSION_ID --expected-bucket-owner <AWS_ACCOUNT_ID> --region ap-southeast-2 --checksum-mode ENABLED siteflow-db-20261118T105451Z-ca777913.sql.gz.age
 ~~~
 
 CloudShellのアクション→ファイルのダウンロードで末尾のファイル名を指定し、WindowsのDownloadsへ保存する。既存同名があれば上書きせず別名とし、補助スクリプトへ引用符付きの第1引数で実パスを渡す。ファイルは暗号文なのでCloudShell/PCにも秘密鍵は送らない。
@@ -944,7 +946,7 @@ examples/mysql/public-api-settings.tsのreadPublicApiSettingsはDB名に ^sitefl
 
 ### 原因を切り分けた読み取り・独立診断
 
-同じアプリイメージのNode v22.23.5で、network none・秘密mountなし・read-only・64MiB/swap禁止・logなしの独立コンテナを使用し、ループバック内のHTTPサーバーに送るHostを比較した。fetchは指定hostを送らず127.0.0.1:一時portとなり、http.request/http.getは指定した13.237.188.172となった。アプリのreadinessは想定外Hostを503で拒否する仕様のため、確認用コードのfetchが不適切だった。これはHost検証を外して直す問題ではない。
+同じアプリイメージのNode v22.23.5で、network none・秘密mountなし・read-only・64MiB/swap禁止・logなしの独立コンテナを使用し、ループバック内のHTTPサーバーに送るHostを比較した。fetchは指定hostを送らずREQUIRES_APPROVED_PUBLIC_IPV4:一時portとなり、http.request/http.getは指定したREQUIRES_APPROVED_PUBLIC_IPとなった。アプリのreadinessは想定外Hostを503で拒否する仕様のため、確認用コードのfetchが不適切だった。これはHost検証を外して直す問題ではない。
 
 - 新DB・正式DB・以前の復元DBの16テーブルのデータはS3目録と一致。正式DBはDDLも目録と完全一致。新DBの案件2・session0。
 - 検証アプリは停止、公開portなし、OOMなし。既存Vinext/Next候補/MySQLのIDと開始時刻は不変、Nginx設定不変、HTTPS200。
@@ -985,7 +987,7 @@ examples/mysql/public-api-settings.tsのreadPublicApiSettingsはDB名に ^sitefl
 
 接続先確認SQLだけをperformance_schema.threadsからinformation_schema.PROCESSLISTへ変更。監視設定、MySQL、アプリ本体、Host/認証/CSRF/TLSチェック、DB名チェックは変更しない。既存の復元DBと既存の権限を再利用し、DB作成/再取込/権限拡大なし。
 
-- 正式DB：mysql.siteflow.test:3306 / siteflow_public_app。既存候補のユーザーは変更しない。
+- 正式DB：mysql.siteflow.test:3306 / REQUIRES_APPROVED_DATABASE_NAME。既存候補のユーザーは変更しない。
 - 復元DB：mysql.siteflow.test:3306 / siteflow_public_restore_s3_20261118。専用ユーザーsf_public_restore_runtime_1118。
 - 実接続：information_schema.PROCESSLISTで専用ユーザー→復元DBが2件、他DBが0件。確認できた後だけ書込試験へ進んだ。
 - 権限：15業務テーブルのSELECT/INSERT/UPDATE/DELETEだけ、60件。新DB外・_prisma_migrations・global・schema-wide・継承roleの権限なし。正式DBへの拒否を試すための書込SQLは実行しない。
@@ -993,7 +995,7 @@ examples/mysql/public-api-settings.tsのreadPublicApiSettingsはDB名に ^sitefl
 
 ### バックアップとDB整合性
 
-- 保存先：siteflow-db-backups-<AWS_ACCOUNT_ID>-ap-southeast-2 / protected/20261118T105451Z-ca777913/siteflow_public_app.sql.gz.age。SSE-S3 AES256、age事前暗号化。
+- 保存先：siteflow-db-backups-<AWS_ACCOUNT_ID>-ap-southeast-2 / protected/20261118T105451Z-ca777913/REQUIRES_APPROVED_DATABASE_NAME.sql.gz.age。SSE-S3 AES256、age事前暗号化。
 - VersionId：jdfp5GyziCeQ8GI3j9Ork9GO4ECB4Y0v。暗号文4,289 bytes、SHA256 ba364bb8846b384c0d9c37be5730ce99ba887a25247283263e8fdd1a1f3da984。S3再取得時の版/ハッシュ/サイズ一致は前段階で確認済み。
 - 本人がVersionId指定で取得し、PCの暗号化済みage identityとBitwarden保管のパスフレーズで復号。秘密鍵/パスフレーズはEC2へ送信せず、PCへ平文backupを保存せずSSHで暗号化EBSへ転送。gzip検査成功。
 - 新DBが未存在→新規作成→テーブル0件を確認して、同じbackupを1回だけVERIFY_IDENTITY付きTLSで取込済み。今回は作成済みDBを再利用しただけ。以前の復元DBも削除/上書きしない。
@@ -1005,7 +1007,7 @@ examples/mysql/public-api-settings.tsのreadPublicApiSettingsはDB名に ^sitefl
 
 1. 正Hostreadiness200・未認証401、実接続先と権限を確認。
 2. 復元済みの架空アカウントでログイン。Secure/HttpOnly session Cookieと案件取得を確認。
-3. 復元DB内に検証案件1件を作成。ID 013eda8f-17c2-4637-929c-0e05b23dbf53。進捗25%に保存し、再取得でも25%を確認。
+3. 復元DB内に検証案件1件を作成。ID REQUIRES_APPROVED_RECORDED_ID。進捗25%に保存し、再取得でも25%を確認。
 4. ログアウト成功、同じ旧sessionで401、DB内session0件を確認。
 5. 外部公開portのない検証アプリだけを停止。今回の新loader/runtimeユーザーは両方ACCOUNT LOCKで、再接続できない状態にした。復元DB/検証案件/停止コンテナ/保護ファイルは記録として保持。
 
@@ -1037,10 +1039,10 @@ examples/mysql/public-api-settings.tsのreadPublicApiSettingsはDB名に ^sitefl
 
 ### 1. 実配信証明書とCertbot証明書の一致
 
-- PCから https://13.237.188.172/ へ通常の証明書検証付きでGET。2026-11-19 05:09:07 JST確認、HTTPS200、TLS1.3、証明書検証成功。-kやrejectUnauthorized:falseは使わない。
+- PCから https://REQUIRES_APPROVED_PUBLIC_IP/ へ通常の証明書検証付きでGET。2026-11-19 05:09:07 JST確認、HTTPS200、TLS1.3、証明書検証成功。-kやrejectUnauthorized:falseは使わない。
 - 現在のnotBefore：2026-11-18 11:18:44 JST（UTC 2026-11-18T02:18:44.000Z）。notAfter：2026-11-25 03:18:43 JST（UTC 2026-11-24T18:18:43.000Z）。確認時点の残りは約142時間。notBeforeは有効開始で、実際の更新処理完了時刻とは区別する。
-- 発行元：Let’s Encrypt YE2。SANにIP Address:13.237.188.172。serial：06A9B482C31AD2F406EF035009FD1574A32C。SHA256指紋：5e5a9e165b6b1a2a4c2e8c20f2a3742e0396eb4e7a117426c7798096d1009a0f。
-- EC2の/etc/letsencrypt/live/13.237.188.172/fullchain.pemの葉証明書と、PCで取得した実配信証明書のSHA256/serial/期限が一致。Nginxのssl_certificateもこのliveパスを参照。現在の実体は/etc/letsencrypt/archive/13.237.188.172/fullchain12.pem。秘密鍵ファイルは読んでいない。
+- 発行元：Let’s Encrypt YE2。SANにIP Address:REQUIRES_APPROVED_PUBLIC_IP。serial：REQUIRES_APPROVED_CERTIFICATE_SERIAL。SHA256指紋：REQUIRES_APPROVED_CERTIFICATE_FINGERPRINT。
+- EC2の/etc/letsencrypt/live/REQUIRES_APPROVED_PUBLIC_IP/fullchain.pemの葉証明書と、PCで取得した実配信証明書のSHA256/serial/期限が一致。Nginxのssl_certificateもこのliveパスを参照。現在の実体は/etc/letsencrypt/archive/REQUIRES_APPROVED_PUBLIC_IP/fullchain12.pem。秘密鍵ファイルは読んでいない。
 
 ### 2. 自動更新の設定・タイマー・直近ログ
 
@@ -1055,7 +1057,7 @@ examples/mysql/public-api-settings.tsのreadPublicApiSettingsはDB名に ^sitefl
 
 ### 3. 既存サービスの正常性・未変更
 
-Vinext/Next候補/MySQLのID・開始時刻を調査前後で比較し不変。MySQL healthy、候補の/api/readyは正Hostで200/ok:true（DB読取確認）、公開HTTPS200。Nginx設定SHA256は2c874b818a1e865283f62cec2e61478d3c4d104beb523bb700e58815bd64d595で不変。DBへの書込やログイン試験は実行していない。
+Vinext/Next候補/MySQLのID・開始時刻を調査前後で比較し不変。MySQL healthy、候補の/api/readyは正Hostで200/ok:true（DB読取確認）、公開HTTPS200。Nginx設定SHA256はREQUIRES_APPROVED_CONFIG_FINGERPRINTで不変。DBへの書込やログイン試験は実行していない。
 
 ### 4. 今すぐ必要な対応
 
@@ -1071,7 +1073,7 @@ EC2を休止すれば更新処理は動かない。2027年の再公開時はEIP�
 4. 下記は将来の承認後の実行案で、今回は未実行。過去の手動予行で用いた一時unitと同じ制限を想定する。実行中のtimer処理と衝突する場合は停止/強制解除せず待って照合する。
 
 ~~~bash
-sudo systemd-run --quiet --wait --pipe --collect --property=MemoryMax=256M --property=MemorySwapMax=0 --property=LimitCORE=0 --property=RuntimeMaxSec=180 <USER_HOME>/certbot-venv/bin/certbot renew --cert-name 13.237.188.172 --non-interactive --no-random-sleep-on-renew
+sudo systemd-run --quiet --wait --pipe --collect --property=MemoryMax=256M --property=MemorySwapMax=0 --property=LimitCORE=0 --property=RuntimeMaxSec=180 <USER_HOME>/certbot-venv/bin/certbot renew --cert-name REQUIRES_APPROVED_PUBLIC_IP --non-interactive --no-random-sleep-on-renew
 ~~~
 
 sudoは対象の管理操作、systemd-runは一時unit、--quietは管理メッセージ抑制、--waitは終了待ち、--pipeは出力受取、--collectは完了した一時unitの管理情報回収。MemoryMaxは256MiB上限、MemorySwapMax=0はswap禁止、LimitCORE=0はcore抑止、RuntimeMaxSecは180秒上限。renewは既存更新設定を使い、--cert-nameはこのIPのlineageだけを対象、--non-interactiveは質問待ちをしない、--no-random-sleep-on-renewは手動実行時だけCertbot側のランダム待ちを省く。ログは内容を分類して記録し、秘密を含みうる生の例外/ACMEログを表示しない。期限判定で見送られる可能性と失敗の可能性があり、タイマー設定を変更するコマンドではない。
@@ -1088,9 +1090,9 @@ sudoは対象の管理操作、systemd-runは一時unit、--quietは管理メッ
 
 ### 7. 読み取りコマンドの役割・根拠
 
-openssl x509 -in /etc/letsencrypt/live/13.237.188.172/fullchain.pem -noout -dates -serial -fingerprint -sha256 は公開証明書だけを読み、-inが入力、-nooutはPEM本体表示なし、-datesが有効期間、-serialが識別番号、-fingerprint/-sha256が内容の指紋。秘密鍵を読むコマンドではない。
+openssl x509 -in /etc/letsencrypt/live/REQUIRES_APPROVED_PUBLIC_IP/fullchain.pem -noout -dates -serial -fingerprint -sha256 は公開証明書だけを読み、-inが入力、-nooutはPEM本体表示なし、-datesが有効期間、-serialが識別番号、-fingerprint/-sha256が内容の指紋。秘密鍵を読むコマンドではない。
 
-curl --fail --silent --show-error --max-time 15 --output /dev/null --write-out "%{http_code}" https://13.237.188.172 は通常のTLS検証付きHTTP取得。--failはHTTPエラーを失敗、--silentは進捗抑止、--show-errorは失敗表示、--max-timeは15秒上限、--outputは本文を保存せず破棄、--write-outは状態コードだけを出す。
+curl --fail --silent --show-error --max-time 15 --output /dev/null --write-out "%{http_code}" https://REQUIRES_APPROVED_PUBLIC_IP は通常のTLS検証付きHTTP取得。--failはHTTPエラーを失敗、--silentは進捗抑止、--show-errorは失敗表示、--max-timeは15秒上限、--outputは本文を保存せず破棄、--write-outは状態コードだけを出す。
 
 systemctl showは状態の読み取り、--propertyは出す項目の限定。journalctl -u certbot-renew.service --since "7 days ago" --no-pager -o json は当該unit/直近7日/ページャーなし/JSONで取得する意味。取得した本文はそのまま出さず、時刻と分類だけを出した。今回certbot renewやdry-runを呼んでいない。
 
@@ -1137,3 +1139,11 @@ Next.jsの公開は未完了。404の原因は未確定で、追加修正・再�
 新worker確認、新規TLS接続、最大30秒・readiness200/ok:trueの3回連続確認と、旧版の静的ファイル参照照合を検証処理へ追加。モック10件成功後、本人承認の再試行を1回実施。公開readinessとNext.js画面の参照一致は成功したが、一時検証枠はアカウント読取準備で中断し、旧版照合を伴ってVinextへ復帰した。
 
 アカウントはUID1000/mode600、検証枠はUID0/cap-drop ALLでアクセスできない構成。秘密ファイルを緩和せず、追加再試行は行っていない。Cookie・ログイン・案件操作は未実施、正式DBの業務書き込みなし。最新結果と未実施の最小修正案は [手動公開記録](MANUAL_PUBLIC_RELEASE.md) を参照。以前の404の直接原因は確定扱いにしない。
+
+## manual-public のOrigin環境ファイル（2026-11-27）
+
+公開先はソースコードへ埋め込まず、`/etc/siteflow/manual-public.env`の`SITEFLOW_PUBLIC_ORIGIN`から渡します。公開テンプレートの例は`https://REQUIRES_APPROVED_PUBLIC_HOST`で、必ず承認済みの実環境値に置き換えてから使用します。値は正規のHTTPS Originだけを受け入れ、認証情報、パス、query、fragment、明示ポート、未設定プレースホルダー、localhost・プライベートIPを拒否します。拒否メッセージに入力値は含めません。
+
+親ディレクトリ`/etc/siteflow`は`root:root`所有・`0700`、ファイルは`root:root`所有・`0600`とし、変数は`SITEFLOW_PUBLIC_ORIGIN`だけに限定します。`deploy/siteflow-next-public.service`と`deploy/siteflow-public-health.service`は`EnvironmentFile=-/etc/siteflow/manual-public.env`を参照します。先頭の`-`はファイルがない場合にsystemdのunit読込を妨げない指定です。前進操作とヘルス確認はPythonスクリプトが副作用前に必須値を検証して拒否します。停止操作はこの値を要求せず、記録済みコンテナの識別照合を維持します。MySQL用`deploy/siteflow-mysql-manual-public.conf`は対象外です。
+
+将来の安全な切替順は、(1) 現環境を別途承認された方法で確認、(2) 環境ファイルをroot所有・`0600`で配置、(3) 値を秘密情報を出さずに形式検証、(4) 新しい`manual-public.py`とunitを配置、(5) systemd設定の検証と承認済みの起動確認、です。設定配置・検証より先にunitやスクリプトを切り替えないでください。今回、EC2のファイル・unit・サービスは変更していません。

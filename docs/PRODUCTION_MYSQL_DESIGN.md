@@ -3,7 +3,7 @@
 最新（2026-11-17 21:21 JST）：**PC実Chromeの非公開HTTPSでログイン・案件保存35％・再読み込み・ログアウトに成功**。証明書dry-run/再読込hook/通常renew正常（実証明書の期限延長なし、11月21日15:26 JST）。候補だけの停止再開と保存保持も成功、旧Vinext/Nginxルーティング維持・HTTPS200。S3/IAMは承認待ち、GitHub production未作成、CD/公開経路変更はローカル準備のみ。詳細は[21節](PREDEPLOY_VALIDATION.md#21-公開前準備証明書非公開ブラウザー復旧cd)。後段は過去の履歴を含む。
 
 
-最新（2026-11-17 20:08〜20:10 JST）：**AWS Next.js候補版が127.0.0.1:3001で稼働**。新正式DBへ確認済み2履歴を適用、runtimeは業務tableのCRUDのみ、migrationユーザーはロック。実HTTPでログイン/案件作成保存再取得/ログアウトと401を確認。Next約181〜188MiB/384MiB、MySQL約231MiB/512MiB、EC2 available最少約826MiB。旧公開HTTPS200・不変。S3/一般公開切替/Git push/再起動は未実施。詳細は[20節](PREDEPLOY_VALIDATION.md#20-aws-nextjs候補版の起動正式db移行ログイン保存検証)。後段の未起動/提案は過去の履歴。
+最新（2026-11-17 20:08〜20:10 JST）：**AWS Next.js候補版がREQUIRES_APPROVED_PUBLIC_IPV4:3001で稼働**。新正式DBへ確認済み2履歴を適用、runtimeは業務tableのCRUDのみ、migrationユーザーはロック。実HTTPでログイン/案件作成保存再取得/ログアウトと401を確認。Next約181〜188MiB/384MiB、MySQL約231MiB/512MiB、EC2 available最少約826MiB。旧公開HTTPS200・不変。S3/一般公開切替/Git push/再起動は未実施。詳細は[20節](PREDEPLOY_VALIDATION.md#20-aws-nextjs候補版の起動正式db移行ログイン保存検証)。後段の未起動/提案は過去の履歴。
 
 
 最新（2026-11-17 19:40 JST（10:40 UTC））：AWS上の架空DB backup→別空DB restoreの定義/全行/整合性一致、アプリ用最小CRUD・TLS必須・他DB/DDL拒否、Next.jsと同じ接続設定/Prisma adapterで正常TLSと不正CA/誤名/平文拒否を確認。MySQL約205MiB/512MiB、host最少約891MiB、旧公開HTTPS200。**実Next HTTP候補/Prisma migration/EC2外backupは未実施。** 詳細・残作業・S3承認案は[検証19節](PREDEPLOY_VALIDATION.md#19-awsでの検証dbバックアップ復元アプリ用tls接続)。後段は過去時点の記録を含む。
@@ -48,7 +48,7 @@ flowchart LR
 | --- | --- | --- |
 | `deploy/compose.production.yaml` | `mysql`、`blue`、`green`の起動条件。`profiles`は起動対象を分ける、`image`はdigestで版固定、`env_file`はホストの設定から値を渡す | 雛形あり。DB以外を誤って同時起動しない。今後log上限/DB停止猶予/healthcheck等を追加検討、今回は未編集 |
 | `deploy/mysql.cnf` | `innodb_buffer_pool_size=128M`はDBのキャッシュ、`max_connections=30`は最大接続数、`performance_schema=OFF`は詳細監視のメモリ削減。TLSを必須化 | ローカルで使った初期値。本番負荷に合格した値ではない。初版は日次復元のみとし`skip-log-bin`追加を提案、時点復旧は提供しない |
-| `deploy/settings.example.json` | releaseのstate/CA/network/DB/公開Originの例。アプリとDB設定が一致するか確認するための地図 | `siteflow.example.com`は例なので実際には使わない。実Originは既存の`https://13.237.188.172`。実設定はEC2内root管理へ |
+| `deploy/settings.example.json` | releaseのstate/CA/network/DB/公開Originの例。アプリとDB設定が一致するか確認するための地図 | `siteflow.example.com`は例なので実際には使わない。実Originは既存の`https://REQUIRES_APPROVED_PUBLIC_IP`。実設定はEC2内root管理へ |
 | `deploy/start-database.sh` | volume/networkの存在と所有ラベル、初回空領域/既存データの区別を確認してMySQLだけ起動 | ローカル拒否条件を検証済み。既定は再開モードで、空領域は明示的な初期化許可が必要。本番未実行 |
 | `deploy/migrate.mjs`・`deploy/prisma-public.config.ts` | 専用ユーザーでTLS確認→Prisma migrate deploy→モデルとの実差分/履歴確認→管理記録 | 専用CLIコンテナの一時処理。アプリ起動の度に自動実行しない |
 | `examples/mysql/public-api-settings.ts` | Origin/固定認証secret/DB名/非rootユーザー/パスワード/TLSの設定検査 | 実装済み。DB名は`siteflow_public_`で始める必要がある |
@@ -72,9 +72,9 @@ MySQLには`stop_grace_period:60s`（正常終了を待つ猶予）と、認証�
 ### Network
 
 - 専用のuser-defined bridgeにMySQL/Next.jsと必要時だけのmigration/backup/restoreを接続する。旧Vinextは接続しない。
-- MySQLには`ports`を付けず、`3306:3306`も`127.0.0.1:3306`も公開しない。`expose`もアクセス制御そのものではない。
+- MySQLには`ports`を付けず、`3306:3306`も`REQUIRES_APPROVED_PUBLIC_IPV4:3306`も公開しない。`expose`もアクセス制御そのものではない。
 - 接続名は雛形と同じ`mysql.siteflow.test:3306`。これはDocker内のaliasで、公的DNS登録は不要。DB証明書のSANにこのDNS名を含める。
-- Next.jsの入口だけ`127.0.0.1:3001/3002`へ公開し、既存Nginxから転送。ネットワークは通常bridgeを使う。アプリの外向き通信を一律遮断する`internal:true`への変更は、この初期案では行わない。
+- Next.jsの入口だけ`REQUIRES_APPROVED_PUBLIC_IPV4:3001/3002`へ公開し、既存Nginxから転送。ネットワークは通常bridgeを使う。アプリの外向き通信を一律遮断する`internal:true`への変更は、この初期案では行わない。
 - Security Groupに3306を追加しない。現在のSG内容は本設計で独立再照会しておらず、公開前に参照する。Docker host/rootや同じbridge内の他コンテナまで遮断されるわけではないため、接続メンバーも制限する。
 
 ## 4. 認証情報・TLS・権限
@@ -174,7 +174,7 @@ DBユーザー/権限、runtime設定/固定auth secret、CA公開証明書/DB�
 | docker compose ... up --detach --no-deps mysql | upは作成/起動、detachはバックグラウンド、no-depsは他サービスを起動しない | 上のスクリプトの内部処理。直接実行して保護を飛ばさない。blue/greenは起動しない |
 | docker compose ... stop --timeout 60 mysql | 対象DBへ通常終了を要求し最大60秒待つ | dataは残る。時間切れで強制終了になり得るためstate/終了ログを確認し、失敗を正常停止としない |
 | docker stats --no-stream / df -h / docker system df | statsは一時点使用量、no-streamは継続しない、df -hは人が読める空き容量、system dfはDocker保存量 | 読み取り。OS/RAM/diskとimage論理量を区別する |
-| curl --fail --silent --show-error --max-time 3 --header 'Host: 13.237.188.172' http://127.0.0.1:3001/api/ready | HTTP失敗は非0、進捗表示なし/エラー表示あり、上限3秒、Hostは公開名を明示 | 200かつJSON ok:trueを検査。root200だけでDB readyとは判断しない |
+| curl --fail --silent --show-error --max-time 3 --header 'Host: REQUIRES_APPROVED_PUBLIC_IP' http://REQUIRES_APPROVED_PUBLIC_IPV4:3001/api/ready | HTTP失敗は非0、進捗表示なし/エラー表示あり、上限3秒、Hostは公開名を明示 | 200かつJSON ok:trueを検査。root200だけでDB readyとは判断しない |
 
 mysqldumpはDBの構造/データをSQLへ出す。次はbackup client内で使う**未実行の例**。`--defaults-extra-file`は最初のオプションに置き、秘密を引数へ直接書かない。接続/TLS/user/passwordは権限を絞ったclient.cnfで指定する。
 

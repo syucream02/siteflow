@@ -294,3 +294,75 @@ Organization利用を第一候補とするが、重複所属の制約・役割�
 Prisma validateとClient生成に成功。その後、SQL生成問題を専用設定で解消し、分離した検証用DBへ適用。所属削除後の履歴保持、別チームへの誤参照の拒否、重複禁止、トランザクションの13件が成功した。本体・認証APIへの統合は未実施。
 設計方針・コマンド・実際の結果・未実装の拒否条件は [MEMBERSHIP_AND_HISTORY.md](MEMBERSHIP_AND_HISTORY.md) を参照。
 最新のDB検証結果は [SCHEMA_DATABASE_CHECK.md](SCHEMA_DATABASE_CHECK.md) を参照。
+
+## 11. 会議の相談・決定・対応事項（2026-11-25、ローカル検証済み）
+
+`MeetingProject`の1件に`MeetingProjectNote`を最大1件関連付ける。`MeetingActionItem`は案件の現在の対応事項で、最初に登録した会議案件を保持する。`MeetingActionSnapshot`は各会議で扱った本体の写しと引き継ぎ元snapshotを参照する。同一本体を引き継ぎ、別タスクとして自動複製しない。
+
+チーム・案件を含む複合外部キーで別チームや別案件への誤関連付けを防ぐ。snapshotの`[teamId, entryId, actionId]`を一意にする。作成者・更新者・担当者は人物記録と当時名を保存する。現在の所属による認可は別途APIで検査し、人物記録の存在を権限とはみなさない。
+
+終了済みのメモ・snapshotはAPIから変更できない。会議終了前には全対象snapshotの本体版を照合し、別の進行中会議からの変更があれば再確認を要求する。追加のみのmigrationを専用ローカルDBに適用した。本番未反映。過去の空の会議記録を推測で補完していない。
+
+詳細は[会議フロー](MEETING_FLOW.md)の最新節。これは上の候補設計を段階的に実装した現在地であり、旧節の過去の検証結果を置き換えるものではない。
+
+## 12. チーム設定・所属・招待（2026-11-25、ローカル検証済み）
+
+追加モデルはなく、Team.versionを初期値1で追加した。チーム管理の名前・所属・役割・招待変更時に増やし、古い画面のexpectedVersionと照合する。現在の所属はTeamMembership、歴史上の人物はTeamParticipantという役割分担を維持する。UserとTeamの物理削除は公開しない。
+
+Invitationは7日間の参加待ち記録で、宛先を現在の認証済み本人と照合する。承認時にmember所属作成とacceptedへの変更を一括保存する。TeamMembershipの[teamId,userId]一意制約が二重所属を防ぐ。有効な重複招待は、同じチームのロック下で検査する。秘密トークン列や公開登録は追加していない。既存Invitationは適用前0件を確認した。
+
+解除前は未完了主副担当・進行役・未対応事項・最後の管理者を全件検査し、TeamParticipantとMeetingProjectNote/MeetingActionItem/MeetingActionSnapshotを変更しない。解除と再参加で過去の名前・内容・担当を補完/復活させない。詳しくは[所属管理の現在地](MEMBERSHIP_AND_HISTORY.md)を参照。
+
+## 13. 現在の統合スキーマとER図（2026-11-26）
+
+この節は db/design/integrated.prisma の現在のモデルとリレーションを要約する。上の節には設計途中の案や当時の「未実装」という記録が残っているため、日付付きの過去記録として読む。現在の実装・検証状態は各節の日付と[検証記録](VERIFICATION.md)を確認する。
+
+Userと認証セッション、チーム、現在の所属、過去の業務上の人物記録、案件と履歴、会議と会議時点の記録を分けている。案件・履歴・会議関連の外部キーにはチームIDが含まれ、異なるチームのレコードを結び付けない構造になっている。
+
+~~~mermaid
+erDiagram
+  User ||--o{ Session : has
+  User ||--o{ Account : has
+  User ||--o{ TeamMembership : joins
+  User ||--o{ TeamParticipant : identified_as
+  User ||--o{ Invitation : invites
+
+  Team ||--o{ TeamMembership : grants_current_access
+  Team ||--o{ Invitation : receives
+  Team ||--o{ TeamParticipant : keeps_history_for
+  Team ||--o{ Project : owns
+  Team ||--o{ Meeting : owns
+
+  TeamParticipant ||--o{ Project : primary_for
+  TeamParticipant ||--o{ Project : creates
+  Project ||--o{ ProjectSupportMember : has_support
+  TeamParticipant ||--o{ ProjectSupportMember : supports
+  Project ||--o{ ProjectProgressHistory : records_progress
+  TeamParticipant ||--o{ ProjectProgressHistory : changes
+  Project ||--o{ ProjectAssignmentHistory : records_assignment
+  TeamParticipant ||--o{ ProjectAssignmentHistory : changes
+  TeamParticipant o|--o{ ProjectAssignmentHistory : previous_or_next
+
+  TeamParticipant ||--o{ Meeting : creates
+  TeamParticipant o|--o{ Meeting : facilitates
+
+  Meeting ||--o{ MeetingProject : includes
+  Project ||--o{ MeetingProject : appears_in
+  MeetingProject ||--o| MeetingProjectNote : has_note
+  MeetingProject ||--o{ MeetingConfirmation : has_confirmations
+  MeetingProject ||--o{ MeetingActionSnapshot : snapshots
+  TeamParticipant ||--o{ MeetingProjectNote : creates_or_updates
+  TeamParticipant ||--o{ MeetingConfirmation : confirms
+  TeamParticipant o|--o{ MeetingConfirmation : revokes
+
+  Project ||--o{ MeetingActionItem : tracks
+  MeetingProject ||--o{ MeetingActionItem : originates
+  TeamParticipant ||--o{ MeetingActionItem : assigned_to
+  TeamParticipant ||--o{ MeetingActionItem : creates_or_updates
+  MeetingActionItem ||--o{ MeetingActionSnapshot : captured_as
+  TeamParticipant ||--o{ MeetingActionSnapshot : assigned_to
+  TeamParticipant ||--o{ MeetingActionSnapshot : records
+  MeetingActionSnapshot o|--o{ MeetingActionSnapshot : carried_from
+~~~
+
+ER図はモデル間の主要な参照関係を示す。認証と現在の操作権限は別に判定し、TeamParticipantの存在だけではアクセスを許可しない。会議スナップショットは会議時点の内容を残し、対応事項本体の更新と過去記録を分離する。詳細な列・複合キー・制約は[統合Prismaスキーマ](../db/design/integrated.prisma)、[会議フロー](MEETING_FLOW.md)、[所属管理](MEMBERSHIP_AND_HISTORY.md)を参照。

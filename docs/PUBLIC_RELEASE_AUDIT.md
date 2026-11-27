@@ -1,5 +1,12 @@
 # Next.js公開前・承認付きCD最終監査
 
+## 追記：公開履歴の判断（2026-11-27）
+
+- 対応方針はA（現在のプレースホルダー化を維持し、既存の開発履歴・PR・CI構成を保持）とする。過去の実環境情報を含むコミットが現在のPublicリポジトリから閲覧可能であることは確認済みで、履歴を残す公開リスクとして扱う。
+- 既存監査で資格情報そのものが含まれるとは確認されていない。過去の実環境情報の閲覧可能性は残るが、AWS側の現在のアクセス制限・リソース状態は未確認であり、侵入可能性を断定しない。
+- 履歴書き換えは今回は行わない。公開状態と履歴の影響を確認した後、履歴改変によるPR・CI・利用者側cloneへの影響を避ける判断とした。AWSアクセス制限の確認は別途必要。
+- 2026-11-27のローカル修正では、既知のUTM計測パラメーターを案件検索条件から分離し、`.gitignore`でネストした`.vinext`を除外する。`*.tsbuildinfo`は既に除外規則があるが、`tsconfig.tsbuildinfo`は追跡中のため、この作業では追跡解除していない。
+
 確認日：2026-11-19 05:24〜05:34 JST。GitHub API/接続プラグイン、EC2 SSHの読み取り、ローカルの安全な検査のみ。
 
 **判定：現状のまま承認付きCDでNext.jsへ公開切替するのはNO-GO。旧Vinext公開を維持する状態は正常。** Next.jsの正式DB接続・S3復元後の業務操作・HTTPSは確認済みだが、GitHub/EC2の配信実設定、追跡可能な公開イメージ、配信コードの補強と再検証が不足している。
@@ -16,10 +23,10 @@ Git push、Actions実行、Docker pull/build/start on EC2、Nginx変更/test/rel
 | ローカルとの差 | local HEADは同じ旧SHAだがworktree99件、ci.yml変更・deploy未追跡。ローカルの新CD実装をGitHub反映済みと扱わない |
 | 旧EC2 CD | siteflow-cd.timer disabled/inactive、service inactive。関連cron entryなし。稼働中はVinext・Next候補・MySQLの3件だけ |
 | 新EC2 CD | siteflow-release.service/timerはnot-found。release/settings/runtime/upstreamと常設cd-check/release scriptも未配置 |
-| 公開先 | /etc/nginx/conf.d/siteflow.confが127.0.0.1:3002へ直接proxy_pass。まだupstream include/slot headerなし |
-| 旧Vinext | 3d97924314a0b8131b53137ce1306c1ab778352c03548e56d58296eb077adc82、ghcr.io/syucream02/siteflow:ae3e31a78da037d0f855e9143ea5cce5e0a6cfe3。GHCR digest ghcr.io/syucream02/siteflow@sha256:46305b1d7ab09f8a7ce1002d2b82dd75d934545b5d45288f805ea646cba741fd、稼働中 |
-| Next候補 | 73f46217da34222bc4ed6ccf5f5273b036f33f152531b8c5fe2448d31fb340b5、127.0.0.1:3001→3000。image ID sha256:44b74c75c1829b97311362138c730c0a8034ecbab6d275ea799b5667b184dbcf、read-only、384MiB/swap禁止、restart=no、log-driver none |
-| Next候補のDB設定 | mysql.siteflow.test:3306 / **siteflow_public_app** / siteflow_runtime / TLS required。復元DB名を使っていない |
+| 公開先 | /etc/nginx/conf.d/siteflow.confがREQUIRES_APPROVED_PUBLIC_IPV4:3002へ直接proxy_pass。まだupstream include/slot headerなし |
+| 旧Vinext | 3d97924314a0b8131b53137ce1306c1ab778352c03548e56d58296eb077adc82、ghcr.io/syucream02/siteflow:ae3e31a78da037d0f855e9143ea5cce5e0a6cfe3。GHCR digest ghcr.io/syucream02/siteflow@sha256:REQUIRES_APPROVED_CERTIFICATE_FINGERPRINT、稼働中 |
+| Next候補 | 73f46217da34222bc4ed6ccf5f5273b036f33f152531b8c5fe2448d31fb340b5、REQUIRES_APPROVED_PUBLIC_IPV4:3001→3000。image ID sha256:REQUIRES_APPROVED_CERTIFICATE_FINGERPRINT、read-only、384MiB/swap禁止、restart=no、log-driver none |
+| Next候補のDB設定 | mysql.siteflow.test:3306 / **REQUIRES_APPROVED_DATABASE_NAME** / REQUIRES_APPROVED_DATABASE_USER / TLS required。復元DB名を使っていない |
 | 実DB接続 | information_schema.PROCESSLISTでsiteflow_runtime→siteflow_public_appを2件確認。ほかのDBへの接続なし |
 | runtime権限 | 正式DBの15業務テーブルだけCRUD各15件。globalはUSAGEだけ、schema-wide0、継承role0。migration表の権限なし |
 | 秘密 | password/auth-secretは暗号化EBSのcandidate/、uid1000/0400、readonly bind。Docker Envに平文secretなし。実値は読まず出力しない |
@@ -53,7 +60,7 @@ GitHubのwebhook一覧とActions管理権限は公開APIでは401で未確認。
 | --- | --- | --- |
 | P0 | production保護 + 配信ゲート | 本人required reviewer、prevent_self_review=false、bypass禁止、main branchのみ。最初はGitHub許可false/EC2 paused。承認記録があっても本番切替許可と同一にしない |
 | P0 | 公開成果物の確定 | レビューした変更を明示commitし、承認後のpush/CIでappとmigrationの固定digest・revision・同一run/attemptを得る。今回pushしない |
-| P0 | 実settings/receipt/秘密/転送先 | 正式DBはsiteflow_public_app、user siteflow_runtime、origin https://13.237.188.172。復元DBや検証ユーザー文字列を実公開設定に混ぜない。CLIに秘密値を展開しない |
+| P0 | 実settings/receipt/秘密/転送先 | 正式DBはsiteflow_public_app、user REQUIRES_APPROVED_DATABASE_USER、origin https://REQUIRES_APPROVED_PUBLIC_IP。復元DBや検証ユーザー文字列を実公開設定に混ぜない。CLIに秘密値を展開しない |
 | P1 | release.shのmigration結合 | schema receiptのschemaHash/DB/host/CAは比較するが**receipt.migrationDigestとmanifest.migrationDigestの一致を比較していない**。固定migration artifactを承認する設計に合わせて等価性チェックを追加する案。静的所見で、改ざんreceiptによる実行再現は今回未検証 |
 | P1 | 同一digest時の稼働確認/復帰 | release.shはcurrent.image一致だけでALREADY_RELEASED終了し、実containerの稼働/readyを確認しない。再起動復帰をCD任せにしない。EBS guard→DB healthy→承認済みcurrent枠を復帰する手順/仕組みを整備 |
 | P1 | 実proxy統合テストfixture | tests/deploy-proxy-check.mjsのsettings/runtime fixtureに、現行release.shが要求するdatabasePasswordFile/authSecretFile/EBS等がない。現行の秘密保護条件へ追従させてLinux上で再検証する。これは静的所見で、今回その統合テストを実行して失敗を観測したわけではない |
@@ -71,13 +78,13 @@ GitHubのwebhook一覧とActions管理権限は公開APIでは401で未確認。
 ## 4. 公開切替前に確定する構成
 
 ~~~text
-現在：外部HTTPS → Nginx（証明書live）→ Vinext 127.0.0.1:3002
-                          非公開確認：Next候補 127.0.0.1:3001 → 正式MySQL
+現在：外部HTTPS → Nginx（証明書live）→ Vinext REQUIRES_APPROVED_PUBLIC_IPV4:3002
+                          非公開確認：Next候補 REQUIRES_APPROVED_PUBLIC_IPV4:3001 → 正式MySQL
 
 承認付きCD案：main → CI → GHCR固定app/migration digest
                         → production本人承認のrecord
 EC2：enabled + pausedなし + incidentなし + main/run/attempt/承認/receipt照合
-    → blue 127.0.0.1:3101 または green :3102 を非公開起動
+    → blue REQUIRES_APPROVED_PUBLIC_IPV4:3101 または green :3102 を非公開起動
     → 正式DB実接続 + ready → Nginx upstreamだけを切替 → 外部HTTPS/slotを確認
 ~~~
 
@@ -95,7 +102,7 @@ Nginx変更点はlocation /の直接proxy_passを/etc/nginx/siteflow/upstream.in
 | 3 | 公開直前に外部/EC2証明書の指紋・期限・IP名を照合、HTTPS200/Certbot timerと直近成功を確認 | 期限不足/不一致/更新失敗。更新/reloadは必要なら別承認 |
 | 4 | 正式DB最新backupをsf_s3_backupでTLS取得し、gzip→既存age公開鍵で暗号化し既存S3 protectedへ新規保存。サイズ/hash/VersionId照合。これは当日batch承認に含める。既存復元成功の証拠と対応付ける | backup不一致/保存失敗/接続先不明。古いbackupを最新としない |
 | 5 | Nginx conf/include/current/previous/legacy state・旧image/CID・現在の開始時刻を暗号化EBS root700/600で保護記録。既存secretの扱い変更は明示承認。Nginx bootstrapをlegacy3002のまま承認後適用しnginx -t→reload→HTTPS200/legacy slot | 構文エラー、元のVinext応答が保てない |
-| 6 | settingsとmigration receiptのDB名=siteflow_public_app、host=mysql.siteflow.test、CA・schemaHash・migration digestを照合。正式userの限定権限/秘密400:1000、EBS UUID/VolumeIdを確認 | 復元DB名/検証user混入、履歴差、CA差、未知/破壊的SQL。DB更新は勝手に実行しない |
+| 6 | settingsとmigration receiptのDB名=REQUIRES_APPROVED_DATABASE_NAME、host=mysql.siteflow.test、CA・schemaHash・migration digestを照合。正式userの限定権限/秘密400:1000、EBS UUID/VolumeIdを確認 | 復元DB名/検証user混入、履歴差、CA差、未知/破壊的SQL。DB更新は勝手に実行しない |
 | 7 | 1候補だけ3101等で非公開起動。image revision=承認SHA、Memory384MiB/swap0/read-only/logなし。起動前後のRAM/ディスク/既存サービスを測定。readinessはhttp.requestまたはcurlの正Hostで確認し不正Host拒否も確認 | 残りメモリ低下/timeout/OOM、既存サービス異常 |
 | 8 | PROCESSLISTで公開枠runtime→正式DB、ほかDB0、正式用権限を確認。/api/ready200。migrationに新SQLが必要なら、別に内容/backup/承認を提示してここで止める | 実接続を確定できない。書き込んで接続先を推測しない |
 | 9 | **公開切替の本人承認後だけ** enabled/pausedを承認範囲で操作し、upstreamをblue3101へatomic更新。nginx -t→reload→外部HTTPS /api/readyとX-SiteFlow-Slotを3回連続確認 | 構文/HTTPS/slot不一致、既存異常。以下rollbackへ |
@@ -142,7 +149,7 @@ release_backupは承認済み復元元の指定、cpは元を保持してコピ�
 4. **bootstrap構成を保ったまま戻す場合**は、承認前に保存したlegacy用includeを/etc/nginx/siteflow/upstream.inc.rollbackへコピーしてmvし、同じnginx -t/reloadを実施。内容は次の2行だけ（現時点ではこのinclude自体が未導入）。
 
 ~~~nginx
-proxy_pass http://127.0.0.1:3002;
+proxy_pass http://REQUIRES_APPROVED_PUBLIC_IPV4:3002;
 set $siteflow_slot legacy;
 ~~~
 
