@@ -6,12 +6,16 @@ running on EC2 is separate and is not changed by publishing this source.
 """
 import datetime
 import hashlib
+import ipaddress
 import json
 import os
 import pathlib
+import re
+import stat
 import subprocess
 import sys
 import time
+import urllib.parse
 import urllib.request
 
 BASE = pathlib.Path('/srv/siteflow-mysql')
@@ -20,7 +24,8 @@ APP = 'siteflow-next-candidate'
 DB = 'siteflow-production-mysql-1'
 UUID = 'SET_DATA_EBS_UUID'
 VOLUME = 'SET_DATA_EBS_SERIAL'
-PUBLIC = 'https://13.237.188.172'
+PUBLIC = None
+PUBLIC_ENV_FILE = pathlib.Path('/etc/siteflow/manual-public.env')
 ENV_KEYS = ('NODE_ENV', 'SITEFLOW_WORKSPACE_MODE', 'SITEFLOW_PUBLIC_ORIGIN',
             'SITEFLOW_DB_HOST', 'SITEFLOW_DB_PORT', 'SITEFLOW_DB_NAME',
             'SITEFLOW_DB_USER', 'SITEFLOW_DB_TLS', 'SITEFLOW_DB_CA_FILE',
@@ -30,6 +35,68 @@ ENV_KEYS = ('NODE_ENV', 'SITEFLOW_WORKSPACE_MODE', 'SITEFLOW_PUBLIC_ORIGIN',
 def require(value, reason):
     if not value:
         raise RuntimeError(reason)
+
+
+def validate_public_origin(origin):
+    require(origin and origin == origin.strip() and 'REQUIRES_APPROVED_' not in origin,
+            'SITEFLOW_PUBLIC_ORIGIN_REQUIRED')
+    try:
+        parsed = urllib.parse.urlsplit(origin)
+        port = parsed.port
+    except ValueError:
+        raise RuntimeError('SITEFLOW_PUBLIC_ORIGIN_INVALID') from None
+    host = parsed.hostname
+    require(parsed.scheme == 'https' and host and parsed.netloc == parsed.netloc.lower() and
+            parsed.username is None and parsed.password is None and parsed.path == '' and
+            not parsed.query and not parsed.fragment and port is None and
+            origin == 'https://' + parsed.netloc,
+            'SITEFLOW_PUBLIC_ORIGIN_INVALID')
+    require(host not in ('localhost', 'example.com', 'example.net', 'example.org') and
+            not host.endswith(('.localhost', '.local', '.lan', '.intranet', '.internal',
+                               '.example', '.example.com', '.example.net', '.example.org',
+                               '.invalid', '.test')),
+            'SITEFLOW_PUBLIC_ORIGIN_INVALID')
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        require(re.fullmatch(r'(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}', host) is not None,
+                'SITEFLOW_PUBLIC_ORIGIN_INVALID')
+    else:
+        require(address.is_global, 'SITEFLOW_PUBLIC_ORIGIN_INVALID')
+    return origin
+
+
+def required_public_origin():
+    origin = os.environ.get('SITEFLOW_PUBLIC_ORIGIN', '')
+    require(origin and origin == origin.strip() and 'REQUIRES_APPROVED_' not in origin,
+            'SITEFLOW_PUBLIC_ORIGIN_REQUIRED')
+    directory = PUBLIC_ENV_FILE.parent
+    require(not directory.is_symlink() and directory.resolve() == directory and
+            directory.stat().st_uid == 0 and directory.stat().st_mode & 0o777 == 0o700,
+            'SITEFLOW_PUBLIC_ORIGIN_DIRECTORY_INVALID')
+    require(hasattr(os, 'O_NOFOLLOW'), 'SITEFLOW_PUBLIC_ORIGIN_FILE_UNSUPPORTED')
+    try:
+        fd = os.open(PUBLIC_ENV_FILE, os.O_RDONLY | os.O_NOFOLLOW)
+    except OSError:
+        raise RuntimeError('SITEFLOW_PUBLIC_ORIGIN_FILE_INVALID') from None
+    try:
+        info = os.fstat(fd)
+        require(stat.S_ISREG(info.st_mode) and info.st_uid == 0 and
+                info.st_mode & 0o777 == 0o600 and info.st_nlink == 1 and
+                0 < info.st_size <= 4096,
+                'SITEFLOW_PUBLIC_ORIGIN_FILE_INVALID')
+        try:
+            lines = os.read(fd, 4097).decode('utf-8').splitlines()
+        except (OSError, UnicodeError):
+            raise RuntimeError('SITEFLOW_PUBLIC_ORIGIN_FILE_INVALID') from None
+    finally:
+        os.close(fd)
+    prefix = 'SITEFLOW_PUBLIC_ORIGIN='
+    require(len(lines) == 1 and lines[0].startswith(prefix),
+            'SITEFLOW_PUBLIC_ORIGIN_FILE_INVALID')
+    configured = lines[0][len(prefix):]
+    require(configured == origin, 'SITEFLOW_PUBLIC_ORIGIN_FILE_MISMATCH')
+    return validate_public_origin(configured)
 
 
 def run(args, timeout=30):
@@ -81,7 +148,7 @@ def canonical_signature(value):
     return value
 
 
-def validate(name, rec):
+def validate(name, rec, check_public_origin=True):
     c = inspect(name)
     require(canonical_signature(signature(c)) == canonical_signature(rec['containers'][name]), 'CONTAINER_CONFIG_DRIFT')
     require(not c['State']['OOMKilled'], 'CONTAINER_OOM')
@@ -92,7 +159,7 @@ def validate(name, rec):
     if name == APP:
         env = signature(c)['env']
         require(env['SITEFLOW_DB_NAME'] == 'siteflow_public_app' and
-                env['SITEFLOW_PUBLIC_ORIGIN'] == PUBLIC and env['SITEFLOW_DB_TLS'] == 'required',
+                (PUBLIC is None or not check_public_origin or env['SITEFLOW_PUBLIC_ORIGIN'] == PUBLIC) and env['SITEFLOW_DB_TLS'] == 'required',
                 'APP_TARGET_MISMATCH')
         require(c['HostConfig']['PortBindings'] == {'3000/tcp': [{'HostIp': '127.0.0.1', 'HostPort': '3001'}]},
                 'APP_PORT_MISMATCH')
@@ -117,8 +184,11 @@ def validate(name, rec):
 
 
 def ready():
+    origin = validate_public_origin(PUBLIC)
+    host = urllib.parse.urlsplit(origin).hostname
+    require(host is not None, 'PUBLIC_ORIGIN_HOST_REQUIRED')
     req = urllib.request.Request('http://127.0.0.1:3001/api/ready',
-                                 headers={'Host': '13.237.188.172', 'X-Forwarded-Proto': 'https'})
+                                 headers={'Host': host, 'X-Forwarded-Proto': 'https'})
     with urllib.request.urlopen(req, timeout=5) as r:
         require(r.status == 200 and json.loads(r.read(4096)).get('ok') is True, 'APP_NOT_READY')
 
@@ -178,10 +248,14 @@ def log_status(rec):
 
 
 def main():
+    global PUBLIC
+    PUBLIC = None
     require(len(sys.argv) == 2 and sys.argv[1] in ('check', 'monitor', 'start-app', 'start-mysql', 'stop-app'),
             'INVALID_MODE')
-    rec = record()
     mode = sys.argv[1]
+    if mode in ('check', 'monitor', 'start-app'):
+        PUBLIC = required_public_origin()
+    rec = record()
     if mode == 'monitor':
         log_status(rec)
     elif mode == 'check':
@@ -190,7 +264,7 @@ def main():
             require(c['State']['Running'], 'CONTAINER_NOT_RUNNING')
         ready()
     elif mode == 'stop-app':
-        c = validate(APP, rec)
+        c = validate(APP, rec, check_public_origin=False)
         if c['State']['Running']:
             run(['docker', 'stop', '--time', '30', c['Id']], timeout=40)
     else:

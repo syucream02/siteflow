@@ -20,6 +20,7 @@
 # next.js
 /.next/
 /.vinext/
+**/.vinext/
 /out/
 
 # misc
@@ -48,6 +49,7 @@ next-env.d.ts
 /.codex/
 /outputs/
 /work/
+/deploy/private-operations/
 
 # Local build cache and deployment identity
 *.tsbuildinfo

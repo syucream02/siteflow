@@ -65,6 +65,8 @@
 **/*.log
 **/*.tsbuildinfo
 **/*.sql
+**/private-operations
+**/private-operations/**
 # migration専用段階で使う履歴のみ許可する。
 !db/design/migrations/
 !db/design/migrations/migration_lock.toml

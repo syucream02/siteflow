@@ -1,15 +1,15 @@
 {
-  "stateDirectory": "/srv/siteflow-mysql/release",
-  "upstreamFile": "/etc/nginx/siteflow/upstream.inc",
-  "runtimeEnvFile": "/srv/siteflow-mysql/config/app-runtime.env",
-  "databasePasswordFile": "/srv/siteflow-mysql/secrets/candidate/db-password",
-  "authSecretFile": "/srv/siteflow-mysql/secrets/candidate/auth-secret",
-  "dataMount": "/srv/siteflow-mysql",
-  "dataFsUuid": "276f374a-7e33-4ff0-b6f4-b0f185280cd6",
-  "dataEbsVolumeId": "vol-01a737715ed956301",
-  "caFile": "/srv/siteflow-mysql/tls/server/ca.pem",
-  "network": "siteflow-production-database",
-  "databaseHost": "mysql.siteflow.test",
-  "databaseName": "siteflow_public_app",
-  "publicOrigin": "https://siteflow.example.com"
+    "stateDirectory":  "REQUIRES_APPROVED_STATE_DIRECTORY",
+    "upstreamFile":  "REQUIRES_APPROVED_NGINX_UPSTREAM_FILE",
+    "runtimeEnvFile":  "REQUIRES_APPROVED_RUNTIME_ENV_FILE",
+    "databasePasswordFile":  "REQUIRES_APPROVED_DATABASE_PASSWORD_FILE",
+    "authSecretFile":  "REQUIRES_APPROVED_AUTH_SECRET_FILE",
+    "dataMount":  "REQUIRES_APPROVED_EBS_MOUNT_POINT",
+    "dataFsUuid":  "REQUIRES_APPROVED_EBS_FILESYSTEM_UUID",
+    "dataEbsVolumeId":  "REQUIRES_APPROVED_EBS_VOLUME_ID",
+    "caFile":  "REQUIRES_APPROVED_DATABASE_CA_FILE",
+    "network":  "REQUIRES_APPROVED_DOCKER_NETWORK",
+    "databaseHost":  "REQUIRES_APPROVED_MYSQL_HOST",
+    "databaseName":  "REQUIRES_APPROVED_DATABASE_NAME",
+    "publicOrigin":  "https://REQUIRES_APPROVED_PUBLIC_HOST"
 }

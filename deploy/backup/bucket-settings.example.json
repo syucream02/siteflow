@@ -1,0 +1,32 @@
+{
+    "bucket":  "REQUIRES_APPROVED_BACKUP_BUCKET_NAME",
+    "region":  "ap-southeast-2",
+    "createBucketConfiguration":  {
+                                      "LocationConstraint":  "ap-southeast-2"
+                                  },
+    "publicAccessBlock":  {
+                              "BlockPublicAcls":  true,
+                              "IgnorePublicAcls":  true,
+                              "BlockPublicPolicy":  true,
+                              "RestrictPublicBuckets":  true
+                          },
+    "ownershipControls":  {
+                              "Rules":  [
+                                            {
+                                                "ObjectOwnership":  "BucketOwnerEnforced"
+                                            }
+                                        ]
+                          },
+    "encryption":  {
+                       "Rules":  [
+                                     {
+                                         "ApplyServerSideEncryptionByDefault":  {
+                                                                                    "SSEAlgorithm":  "AES256"
+                                                                                }
+                                     }
+                                 ]
+                   },
+    "versioning":  {
+                       "Status":  "Enabled"
+                   }
+}

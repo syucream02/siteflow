@@ -9,6 +9,7 @@ After=srv-siteflow\x2dmysql.mount
 [Service]
 Type=oneshot
 RemainAfterExit=yes
+EnvironmentFile=-/etc/siteflow/manual-public.env
 ExecStart=/usr/bin/python3 /usr/local/lib/siteflow/manual-public.py start-app
 ExecStop=/usr/bin/python3 /usr/local/lib/siteflow/manual-public.py stop-app
 TimeoutStartSec=180
